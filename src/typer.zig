@@ -164,16 +164,10 @@ pub const Typer = struct {
         {
             for (types) |typ| {
                 switch (typ) {
-                    .Composite => |composite_index| {
-                        const composite_type = this.interp.composite_types.items[composite_index];
-                        switch (composite_type) {
-                            .Union => |union_index| {
-                                const union_type = this.interp.union_types.items[union_index];
-                                for (union_type.variants) |variant| {
-                                    try flattened.append(this.allocator, variant);
-                                }
-                            },
-                            else => try flattened.append(this.allocator, typ),
+                    .Union => |union_index| {
+                        const union_type = this.interp.union_types.items[union_index];
+                        for (union_type.variants) |variant| {
+                            try flattened.append(this.allocator, variant);
                         }
                     },
                     else => try flattened.append(this.allocator, typ),
@@ -205,37 +199,30 @@ pub const Typer = struct {
         }
 
         var found_index: ?usize = null;
-        for (this.interp.composite_types.items) |typ, i| {
-            switch (typ) {
-                .Union => |union_index| {
-                    const union_type = this.interp.union_types.items[union_index];
-
-                    if (union_type.variants.len != flattened.items.len)
-                        continue;
-                    
-                    for (union_type.variants) |union_variant| {
-                        var found = false;
-                        for (flattened.items) |types_variant| {
-                            if (types_variant.eql(union_variant)) {
-                                found = true;
-                                break;
-                            }
-                        }
-
-                        if (!found) 
-                            break;
-                    } else {
-                        found_index = i;
+        for (this.interp.union_types.items) |union_type, union_index| {
+            if (union_type.variants.len != flattened.items.len)
+                continue;
+            
+            for (union_type.variants) |union_variant| {
+                var found = false;
+                for (flattened.items) |types_variant| {
+                    if (types_variant.eql(union_variant)) {
+                        found = true;
+                        break;
                     }
-                    
+                }
+
+                if (!found) 
                     break;
-                },
-                else => {},
+            } else {
+                found_index = union_index;
             }
+            
+            break;
         }
 
-        if (found_index) |composite_index| {
-            return Type{ .Composite = @intCast(u32, composite_index) };
+        if (found_index) |union_index| {
+            return Type{ .Union = @intCast(u32, union_index) };
         }
 
         const variants = try this.allocator.alloc(Type, flattened.items.len);
@@ -246,9 +233,7 @@ pub const Typer = struct {
         const defn = UnionTypeDefinition{ .variants = variants };
 
         try this.interp.union_types.append(this.allocator, defn);
-        try this.interp.composite_types.append(this.allocator, TypeDefinition{ .Union = @intCast(u32, this.interp.union_types.items.len - 1) });
-
-        return Type{ .Composite = @intCast(u32, this.interp.composite_types.items.len - 1) };
+        return Type{ .Union = @intCast(u32, this.interp.union_types.items.len - 1) };
     }
 
     fn typecheckNodeAndAdd(this: *This, node: *Ast) !void {
@@ -617,34 +602,25 @@ pub const Typer = struct {
     }
 
     fn typecheckCall(this: *This, call: *AstBinary, lhs: *Ast, rhs: *Ast) !void {
-        const composite_index = switch (lhs.typ.?) {
-            .Composite => |composite_index| composite_index,
-            .Type => switch (lhs.kind) {
-                .GetType => switch (lhs.downcast(AstGetType).typ_of) {
-                    .Composite => |composite_index| composite_index,
-                    else => return raise(error.TypeError, &this.err_msg, lhs.token.location, "A {} value is not callable.", .{lhs.typ.?}),
-                },
-                else => return, // @NOTE: Type is not retrievable at typecheck time so we leave it for runtime.
-            },
-            else => return raise(error.TypeError, &this.err_msg, lhs.token.location, "A {} value is not callable.", .{lhs.typ.?}),
-        };
+        var typ = lhs.typ.?;
+        if (lhs.kind == .GetType) {
+            const get = lhs.downcast(AstGetType);
+            typ = get.typ_of;
+        }
 
-        const type_def = this.interp.composite_types.items[composite_index];
-
-        switch (type_def) {
+        switch (typ) {
             .Tuple => |tuple_index| {
                 const tuple_type = this.interp.tuple_types.items[tuple_index];
                 
                 std.debug.assert(rhs.kind == .Comma);
                 try this.typecheckCallArguments(tuple_type.fields, rhs.downcast(AstBlock));
                 
-                call.typ = Type{ .Composite = composite_index };
+                call.typ = Type{ .Tuple = tuple_index };
             } ,
             .Tag => |_| todo("Implement typecheck for calling tag types."),
             .Lambda => |_| todo("Implement typecheck for calling lambda types."),
             else => return raise(error.TypeError, &this.err_msg, lhs.token.location, "A {} value is not callable.", .{lhs.typ.?}),
         }
-
     }
 
     fn typecheckCallArguments(this: *This, params: []NamedParam, args: *AstBlock) !void {
@@ -736,8 +712,19 @@ pub const Typer = struct {
     fn typecheckVar(this: *This, _var: *AstVar) !*AstVar {
         const t_init = (try this.typecheckNode(_var.initializer)).?;
 
+        var var_type = t_init.typ.?;
+        if (_var.specified_type) |specified_type_signature| {
+            const specified_type = try this.typecheckTypeSignature(specified_type_signature);
+            std.debug.print("::: init typ = {}\n::: spec typ = {}\n", .{ t_init.typ.?, specified_type });
+            if (!t_init.typ.?.compat(specified_type)) {
+                return raise(error.TypeError, &this.err_msg, t_init.token.location, "Cannot initialize a variable with a `{}` value when it was specified to be a `{}` value.", .{ t_init.typ.?, specified_type });
+            }
+
+            var_type = specified_type;
+        }
+
         const current_scope = this.currentScope();
-        const binding = Binding{ .Var = .{ .typ = t_init.typ.?, .index = current_scope.num_vars, .global = true } }; // @TODO: Actually determine if global or not by comparing to current functions scope
+        const binding = Binding{ .Var = .{ .typ = var_type, .index = current_scope.num_vars, .global = true } }; // @TODO: Actually determine if global or not by comparing to current functions scope
         _ = try current_scope.addBinding(this.allocator, _var.ident, binding, &this.err_msg);
 
         _var.initializer = t_init;

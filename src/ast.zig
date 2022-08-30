@@ -430,11 +430,19 @@ pub const AstVar = struct {
     typ: ?Type,
     ident: *AstIdent,
     initializer: *Ast,
+    specified_type: ?*AstTypeSignature,
 
     const This = @This();
 
-    pub fn init(token: Token, ident: *AstIdent, initializer: *Ast) This {
-        return This{ .kind = .Var, .token = token, .typ = null, .ident = ident, .initializer = initializer };
+    pub fn init(token: Token, ident: *AstIdent, initializer: *Ast, specified_type: ?*AstTypeSignature) This {
+        return This{
+            .kind = .Var,
+            .token = token,
+            .typ = null,
+            .ident = ident,
+            .initializer = initializer,
+            .specified_type = specified_type
+        };
     }
 
     pub fn asAst(this: *This) *Ast {

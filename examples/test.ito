@@ -68,6 +68,11 @@ age
 var yob = 2022 - age
 yob
 
+var matrix =
+  if yob > 2000
+    "There is no spoon"
+matrix
+
 var i = 0
 while i < 5
   i = i + 1
@@ -85,5 +90,7 @@ var a = True
 var b = False
 a and b
 
-# var x : Int|Char = 80085
-# x
+var x : Int|Char = 80085
+x
+x = 'B'
+x

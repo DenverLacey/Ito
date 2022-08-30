@@ -87,6 +87,7 @@ pub const Token = struct {
             .RightCurly => .None,
             .LeftSquare => .Call,
             .RightSquare => .None,
+            .Pipe => .BitOr,
 
             // Operators
             .Bang => .Unary,
@@ -147,6 +148,7 @@ pub const Token = struct {
                 .RightCurly => try writer.print("}}", .{}),
                 .LeftSquare => try writer.print("[", .{}),
                 .RightSquare => try writer.print("]", .{}),
+                .Pipe => try writer.print("|", .{}),
 
                 // Operators
                 .Bang => try writer.print("!", .{}),
@@ -207,6 +209,7 @@ pub const TokenKind = enum {
     RightCurly,
     LeftSquare,
     RightSquare,
+    Pipe,
 
     // Operators
     Bang,
@@ -262,6 +265,7 @@ pub const TokenData = union(TokenKind) {
     RightCurly,
     LeftSquare,
     RightSquare,
+    Pipe,
 
     // Operators
     Bang,
@@ -320,6 +324,7 @@ pub const TokenData = union(TokenKind) {
             .RightCurly => _ = try writer.write(".RightCurly"),
             .LeftSquare => _ = try writer.write(".LeftSqaure"),
             .RightSquare => _ = try writer.write(".RightSquare"),
+            .Pipe => _ = try writer.write(".Pipe"),
 
             // Operators
             .Bang => _ = try writer.write(".Bang"),
@@ -383,7 +388,7 @@ pub const TokenPrecedence = enum {
     }
 };
 
-const Tokenizer = struct {
+pub const Tokenizer = struct {
     allocator: Allocator,
     source: Utf8Iterator,
     filename: []const u8,
@@ -399,7 +404,7 @@ const Tokenizer = struct {
 
     const This = @This();
 
-    fn init(allocator: Allocator, err_msg: *ErrMsg, filename: []const u8, source: []const u8) !This {
+    pub fn init(allocator: Allocator, err_msg: *ErrMsg, filename: []const u8, source: []const u8) !This {
         return This{
             .allocator = allocator,
             .source = (try Utf8View.init(source)).iterator(),
@@ -789,6 +794,7 @@ const Tokenizer = struct {
             '}' => Token.init(this.indentation, .RightCurly, location),
             '[' => Token.init(this.indentation, .LeftSquare, location),
             ']' => Token.init(this.indentation, .RightSquare, location),
+            '|' => Token.init(this.indentation, .Pipe, location),
             '!' => if (this.nextIfEq('='))
                 Token.init(this.indentation, .BangEqual, location)
             else
@@ -820,17 +826,6 @@ pub const Parser = struct {
     parsing_comma_separated_expressions: bool,
 
     const This = @This();
-
-    pub fn init(allocator: Allocator, filename: []const u8, source: []const u8) !This {
-        var this = This{
-            .allocator = allocator,
-            .tokenizer = undefined,
-            .err_msg = ErrMsg{},
-            .parsing_comma_separated_expressions = false
-        };
-        this.tokenizer = try Tokenizer.init(allocator, &this.err_msg, filename, source);
-        return this;
-    }
 
     fn createNode(this: *This, comptime T: type, args: anytype) !*T {
         var node = try this.allocator.create(T);
@@ -901,6 +896,7 @@ pub const Parser = struct {
 
     fn expect(this: *This, kind: TokenKind, comptime err_msg: []const u8) !Token {
         const next = try this.tokenizer.peek(0);
+
         if (next) |n| {
             if (n.data != kind) {
                 return raise(error.ParseError, &this.err_msg, n.location, err_msg, .{});
@@ -1345,7 +1341,7 @@ pub const Parser = struct {
 
             var param_type: ?*AstTypeSignature = null;
             if ((try this.match(.Colon)) != null) {
-                param_type = try this.parseTypeSignature();
+                param_type = try this.parseTypeSignature(true);
             }
 
             const param = try this.createNode(AstParam, .{ param_name.token, param_ident, param_type });
@@ -1365,7 +1361,7 @@ pub const Parser = struct {
 
         var ret_type: ?*AstTypeSignature = null;
         if ((try this.match(.Colon)) != null) {
-            ret_type = try this.parseTypeSignature();
+            ret_type = try this.parseTypeSignature(true);
         }
 
         _ = try this.expect(.Equal, "Expected `=` after function signature.");
@@ -1378,7 +1374,6 @@ pub const Parser = struct {
     fn parseVar(this: *This, token: Token) !*Ast {
         var decls = ArrayListUnmanaged(*AstVar){};
 
-
         try this.skipNewlines();
         const first = (try this.tokenizer.peek(0)) orelse return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `var` keyword.", .{});
         if (first.indentation < token.indentation) {
@@ -1387,10 +1382,16 @@ pub const Parser = struct {
             const ident = (try this.parseIdent()) orelse {
                 return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `var` keyword.", .{});
                 };
+
+            var specified_type: ?*AstTypeSignature = null;
+            if ((try this.match(.Colon)) != null) {
+                specified_type = try this.parseTypeSignature(true);
+            }
+
             const eql_token = try this.expect(.Equal, "Expected `=` after identifier in variable declaration.");
             const initializer = try this.parseExpression();
             
-            const decl = try this.createNode(AstVar, .{ eql_token, ident, initializer });
+            const decl = try this.createNode(AstVar, .{ eql_token, ident, initializer, specified_type });
             try decls.append(this.allocator, decl);
         }
         
@@ -1407,10 +1408,16 @@ pub const Parser = struct {
                 const ident = (try this.parseIdent()) orelse {
                     return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `var` keyword.", .{});
                 };
+
+                var specified_type: ?*AstTypeSignature = null;
+                if ((try this.match(.Colon)) != null) {
+                    specified_type = try this.parseTypeSignature(true);
+                }
+
                 const eql_token = try this.expect(.Equal, "Expected `=` after identifier in variable declaration.");
                 const initializer = try this.parseExpression();
 
-                const decl = try this.createNode(AstVar, .{ eql_token, ident, initializer });
+                const decl = try this.createNode(AstVar, .{ eql_token, ident, initializer, specified_type });
                 try decls.append(this.allocator, decl);
             } else {
                 break;
@@ -1436,7 +1443,7 @@ pub const Parser = struct {
                 return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `type` keyword.", .{});
             };
             const eql_token = try this.expect(.Equal, "Expected `=` after identifier in type declaration.");
-            const signature = try this.parseTypeSignature();
+            const signature = try this.parseTypeSignature(true);
 
             const decl = try this.createNode(AstType, .{ eql_token, ident, signature });
             try decls.append(this.allocator, decl);
@@ -1456,7 +1463,7 @@ pub const Parser = struct {
                     return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `type` keyword.", .{});
                 };
                 const eql_token = try this.expect(.Equal, "Expected `=` after identifier in type declaration.");
-                const signature = try this.parseTypeSignature();
+                const signature = try this.parseTypeSignature(true);
 
                 const decl = try this.createNode(AstType, .{ eql_token, ident, signature });
                 try decls.append(this.allocator, decl);
@@ -1472,7 +1479,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseTypeSignature(this: *This) anyerror!*AstTypeSignature {
+    fn parseTypeSignature(this: *This, parse_unions: bool) anyerror!*AstTypeSignature {
         var sig: *AstTypeSignature = undefined;
 
         try this.skipNewlines();
@@ -1488,9 +1495,9 @@ pub const Parser = struct {
             return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected a type signature.", .{});
         }
 
-        // @TODO:
-        // Union type signatures e.g `A | B`
-        //
+        if (parse_unions and (try this.match(.Pipe)) != null) {
+            sig = try this.parseUnionTypeSignature(sig);
+        }
 
         return sig;
     }
@@ -1509,7 +1516,7 @@ pub const Parser = struct {
             try field_names.append(this.allocator, name);
 
             if ((try this.match(.Colon)) != null) {
-                const sig = try this.parseTypeSignature();
+                const sig = try this.parseTypeSignature(true);
                 try field_types.append(this.allocator, sig);
             } else {
                 try field_types.append(this.allocator, null);
@@ -1558,6 +1565,24 @@ pub const Parser = struct {
 
         var node = try this.allocator.create(AstTypeSignature);
         node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Tag = .{ .tag_names = tag_names.items } });
+        return node;
+    }
+
+    fn parseUnionTypeSignature(this: *This, previous: *AstTypeSignature) !*AstTypeSignature {
+        var variant_signautres = ArrayListUnmanaged(*AstTypeSignature){};
+        errdefer variant_signautres.deinit(this.allocator);
+
+        try variant_signautres.append(this.allocator, previous);
+
+        while (!try this.checkEof()) {
+            const variant = try this.parseTypeSignature(false);
+            try variant_signautres.append(this.allocator, variant);
+
+            if ((try this.match(.Pipe)) == null) break;
+        }     
+
+        var node = try this.allocator.create(AstTypeSignature);
+        node.* = AstTypeSignature.init(previous.token, AstTypeSignature.Data{ .Union = .{ .variants = variant_signautres.items }});
         return node;
     }
 

@@ -632,14 +632,7 @@ pub const Evaluator = struct {
         typ: Type,
         args: *AstBlock,
     ) anyerror!Value {
-        const composite_index = switch (typ) {
-            .Composite => |composite_index| composite_index,
-            else => unreachable,
-        };
-
-        const type_def = this.interp.composite_types.items[composite_index];
-
-        switch (type_def) {
+        switch (typ) {
             .Tuple => |tuple_index| {
                 const tuple_type = this.interp.tuple_types.items[tuple_index];
                 return this.typecheckCallTupleType(typ, tuple_type, args);
@@ -699,12 +692,7 @@ pub const Evaluator = struct {
     }
 
     fn evaluateDotType(this: *This, typ: Type, field_idenet_node: *AstIdent) anyerror!Value {
-        const composite_index = switch (typ) {
-            .Composite => |composite_index| composite_index,
-            else => todo("Implement dot for non composite types."),
-        };
-
-        const defn = switch (this.interp.composite_types.items[composite_index]) {
+        const defn = switch (typ) {
             .Tuple => |tuple_index| this.interp.tuple_types.items[tuple_index],
             else => unreachable,
         };
@@ -1062,25 +1050,6 @@ pub const Evaluator = struct {
 
         try this.stack.pushVariable(this.allocator, this.currentScope(), var_ident, initial);
     }
-
-    // fn evaluateStruct(this: *This, _struct: *AstStruct) anyerror!void {
-    //     const ident = _struct.ident.ident;
-    //     var fields = ArrayListUnmanaged(Struct.Field){};
-
-    //     for (_struct.body.nodes) |node| {
-    //         switch (node.kind) {
-    //             .Ident => {
-    //                 const node_id = node.downcast(AstIdent);
-    //                 try fields.append(this.allocator, Struct.Field{ .name = node_id.ident });
-    //             },
-    //             else => return raise(error.RuntimeError, node.token.location, "Expected a field name in struct body.", &this.err_msg),
-    //         }
-    //     }
-
-    //     const struct_val = Value{ .Struct = try this.gc.allocateStruct(Struct.init(ident, fields.items)) };
-
-    //     _ = try this.currentScope().addVariable(ident, struct_val, _struct.token.location, &this.err_msg);
-    // }
 
     // fn evaluateExtend(this: *This, extend: *AstExtend) anyerror!void {
     //     const struct_value = try this.evaluateNode(extend._struct);

@@ -24,7 +24,11 @@ pub const Type = union(enum) {
     Num,
     Str,
     Type,
-    Composite: u32,
+    List: u32,
+    Tuple: u32,
+    Tag: u32,
+    Union: u32,
+    Lambda: u32,
 
     const This = @This();
 
@@ -62,10 +66,26 @@ pub const Type = union(enum) {
                 .Type => return true,
                 else => return false,
             },
-            .Composite => |this_index| switch (other) {
-                .Composite => |other_index| return this_index == other_index,
+            .List => |this_index| switch (other) {
+                .List => |other_index| return this_index == other_index,
                 else => return false,
-            }
+            },
+            .Tuple => |this_index| switch (other) {
+                .Tuple => |other_index| return this_index == other_index,
+                else => return false,
+            },
+            .Tag => |this_index| switch (other) {
+                .Tag => |other_index| return this_index == other_index,
+                else => return false,
+            },
+            .Union => |this_index| switch (other) {
+                .Union => |other_index| return this_index == other_index,
+                else => return false,
+            },
+            .Lambda => |this_index| switch (other) {
+                .Lambda => |other_index| return this_index == other_index,
+                else => return false,
+            },
         }
     }
 
@@ -73,43 +93,86 @@ pub const Type = union(enum) {
         switch (this) {
             .Any => switch (with) {
                 .Any => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .None => switch (with) {
                 .Any, .None => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .Bool => switch (with) {
                 .Any, .Bool => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .Char => switch (with) {
                 .Any, .Char => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .Int => switch (with) {
                 .Any, .Int => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .Num => switch (with) {
                 .Any, .Num => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .Str => switch (with) {
                 .Any, .Str => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
             .Type => switch (with) {
-                .Type => return true,
+                .Any, .Type => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
-            .Composite => |this_index| switch (with) {
+            .List => |index| switch (with) {
                 .Any => return true,
-                // @TODO: Check if this is a subset of other
-                .Composite => |other_index| return this_index == other_index,
+                .List => |with_index| return index == with_index,
+                .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
-            }
+            },
+            .Tuple => |index| switch (with) {
+                .Any => return true,
+                .Tuple => |with_index| return index == with_index,
+                .Union => |with_index| return this.compatWithUnion(with_index),
+                else => return false,
+            },
+            .Tag => |index| switch (with) {
+                .Any => return true,
+                .Tag => |with_index| return index == with_index,
+                .Union => |with_index| return this.compatWithUnion(with_index),
+                else => return false,
+            },
+            .Union => |index| switch (with) {
+                .Any => return true,
+                .Union => |with_index| {
+                    const interp = Interpreter.get();
+                    const this_union = interp.union_types.items[index];
+                    const with_union = interp.union_types.items[with_index];
+                    const superset = with_union.isSuperset(this_union.variants);
+                    return superset;
+                },
+                else => return false,
+            },
+            .Lambda => |index| switch (with) {
+                .Any => return true,
+                .Lambda => |with_index| return index == with_index,
+                else => return false,
+            },
         }
+    }
+
+    fn compatWithUnion(this: This, union_index: u32) bool {
+        const interp = Interpreter.get();
+        const with_union = interp.union_types.items[union_index];
+        const superset = with_union.isSuperset(&[_]Type{this});
+        return superset;
     }
 
     pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -123,61 +186,49 @@ pub const Type = union(enum) {
             .Num => _ = try writer.write("Num"),
             .Str => _ = try writer.write("Str"),
             .Type => _ = try writer.write("Type"),
-            .Composite => |composite_index| {
-                switch (interp.composite_types.items[composite_index]) {
-                    .List => |index| {
-                        const list_type = interp.list_types.items[index];
-                        try writer.print("List[{}]", .{list_type.item_type});
-                    },
-                    .Tuple => |index| {
-                        const tuple_type = interp.tuple_types.items[index];
+            .List => |index| {
+                const list_type = interp.list_types.items[index];
+                try writer.print("List[{}]", .{list_type.item_type});
+            },
+            .Tuple => |index| {
+                const tuple_type = interp.tuple_types.items[index];
 
-                        _ = try writer.write("(");
-                        for (tuple_type.fields) |field, i| {
-                            try writer.print("{s} : {}", .{field.name, field.typ});
-                            if (i < tuple_type.fields.len - 1) {
-                                _ = try writer.write(", ");
-                            }
-                        }
-                        _ = try writer.write(")");
-                    },
-                    .Tag => |index| {
-                        const tag_type = interp.tag_types.items[index];
-
-                        // @TODO: Payload stuff
-
-                        _ = try writer.write("[");
-                        for (tag_type.variants) |variant, i| {
-                            try writer.print("{s}", .{variant.name});
-                            if (i < tag_type.variants.len - 1) {
-                                _ = try writer.write(", ");
-                            }
-                        }
-                        _ = try writer.write("]");
-                    },
-                    .Union => |index| {
-                        const union_type = interp.union_types.items[index];
-
-                        for (union_type.variants) |variant, i| {
-                            try writer.print("{}", .{variant});
-                            if (i < union_type.variants.len - 1) {
-                                _ = try writer.write("|");
-                            }
-                        }
-                    },
-                    .Lambda => |_| todo("Implement printing lambda type values."),
+                _ = try writer.write("(");
+                for (tuple_type.fields) |field, i| {
+                    try writer.print("{s} : {}", .{field.name, field.typ});
+                    if (i < tuple_type.fields.len - 1) {
+                        _ = try writer.write(", ");
+                    }
                 }
-            }
+                _ = try writer.write(")");
+            },
+            .Tag => |index| {
+                const tag_type = interp.tag_types.items[index];
+
+                // @TODO: Payload stuff
+
+                _ = try writer.write("[");
+                for (tag_type.variants) |variant, i| {
+                    try writer.print("{s}", .{variant.name});
+                    if (i < tag_type.variants.len - 1) {
+                        _ = try writer.write(", ");
+                    }
+                }
+                _ = try writer.write("]");
+            },
+            .Union => |index| {
+                const union_type = interp.union_types.items[index];
+
+                for (union_type.variants) |variant, i| {
+                    try writer.print("{}", .{variant});
+                    if (i < union_type.variants.len - 1) {
+                        _ = try writer.write("|");
+                    }
+                }
+            },
+            .Lambda => |_| todo("Implement printing lambda type values."),
         }
     }
-};
-
-pub const TypeDefinition = union(enum) {
-    List: u32,
-    Tuple: u32,
-    Tag: u32,
-    Union: u32,
-    Lambda: u32,
 };
 
 pub const NamedParam = struct {
@@ -209,7 +260,7 @@ pub const UnionTypeDefinition = struct {
 
     const This = @This();
 
-    pub fn isSuperset(this: *This, other: []Type) bool {
+    pub fn isSuperset(this: *const This, other: []Type) bool {
         var superset = true;
         for (other) |other_variant| {
             var found = false;
