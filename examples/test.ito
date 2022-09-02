@@ -4,7 +4,7 @@
 #    a + b
 
 
-type
+type 
   Fullname =
     ( firstname : Str
     , lastname : Str
@@ -39,10 +39,10 @@ person
 # println direciton
 
 
-# if name == person.name
-#   "The names match!"
-# else
-#   "The names don't match!"
+if name == person.name
+  "The names match!"
+else
+  "The names don't match!"
 
 
 if 5.4 > 2
@@ -82,8 +82,7 @@ while i < 5
 # for x in 0..5
 #   x
 
-# @TODO: If we write the call to Fullname as `(Fullname "Six", "Seven") it fails to parse
-var numbers = [1, 2, 3, 4, "five", Fullname("Six", "Seven")]
+var numbers = [1, 2, 3, 4, "five", (Fullname "Six", "Seven")]
 numbers
 
 var a = True
@@ -94,3 +93,17 @@ var x : Int|Char = 80085
 x
 x = 'B'
 x
+
+var string = matrix ?? "Nebuchadnezzar"
+string
+
+# var other_string =
+#   if matrix is Str
+#     matrix
+#   else
+#     "Burgers"
+# other_string
+
+# This is a thing but is commented out because it crashes the program
+# string = matrix?
+# string

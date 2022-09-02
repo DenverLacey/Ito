@@ -236,6 +236,23 @@ pub const Typer = struct {
         return Type{ .Union = @intCast(u32, this.interp.union_types.items.len - 1) };
     }
 
+    fn unionTypeWithVariantsRemoved(this: *This, union_type: UnionTypeDefinition, to_remove: []const Type) !Type {
+        var variants = ArrayListUnmanaged(Type){};
+        errdefer variants.deinit(this.allocator);
+
+        for (union_type.variants) |variant| {
+            for (to_remove) |tr| {
+                if (variant.eql(tr)) {
+                    break;
+                }
+            } else {
+                try variants.append(this.allocator, variant);
+            }
+        }
+
+        return try this.unionizeTypes(variants.items);
+    }
+
     fn typecheckNodeAndAdd(this: *This, node: *Ast) !void {
         const t_node = (try this.typecheckNode(node)) orelse return;
         try this.addNode(t_node);
@@ -262,7 +279,8 @@ pub const Typer = struct {
 
             // Unary
             .Negate,
-            .Not => {
+            .Not,
+            .Unwrap => {
                 const unary = node.downcast(AstUnary);
                 t_node = (try this.typecheckUnary(unary)).asAst();
             },
@@ -281,10 +299,14 @@ pub const Typer = struct {
             .And,
             .Index,
             .Call,
-            .Dot,
-            .ExclusiveRange => {
+            .ExclusiveRange,
+            .NoneOr => {
                 const binary = node.downcast(AstBinary);
                 t_node = (try this.typecheckBinary(binary)).asAst();
+            },
+            .Dot => {
+                const dot = node.downcast(AstBinary);
+                t_node = (try this.typecheckDot(dot)).asAst();
             },
 
             // Blocks
@@ -423,6 +445,31 @@ pub const Typer = struct {
                     return raise(error.TypeError, &this.err_msg, t_sub.token.location, "`!` operator expected a `Bool` value but encountered a `{}` value.", .{t_sub.typ.?});
                 }
             },
+            .Unwrap => {
+                switch (t_sub.typ.?) {
+                    .Union => |union_index| {
+                        const union_type = this.interp.union_types.items[union_index];
+                        
+                        const copied = try this.allocator.alloc(Type, union_type.variants.len - 1);
+
+                        var write_copied: usize = 0;
+                        for (union_type.variants) |variant| {
+                            if (variant == .None) continue;
+
+                            if (write_copied >= copied.len) {
+                                return raise(error.TypeError, &this.err_msg, t_sub.token.location, "`?` operator expected a potentially `None` value but encountered a `{}` value.", .{t_sub.typ.?});
+                            }
+
+                            copied[write_copied] = variant;
+                            write_copied += 1;
+                        }
+
+                        unary.typ = try this.unionizeTypes(copied);
+                    },
+                    .None => return raise(error.TypeError, &this.err_msg, t_sub.token.location, "Unwrap of `None` value will always fail.", .{}),
+                    else => return raise(error.TypeError, &this.err_msg, t_sub.token.location, "`?` operator expected a potentially `None` value but encountered a `{}` value.", .{t_sub.typ.?}),
+                }
+            },
             else => return raise(error.InternalError, &this.err_msg, unary.token.location, "`{}` is not a unary node.", .{unary.kind}),
         }
 
@@ -493,14 +540,38 @@ pub const Typer = struct {
             .Call => {
                 try this.typecheckCall(binary, t_lhs, t_rhs.?);
             },
-            .Dot => {
-                try this.typecheckDot(binary, t_lhs, t_rhs.?);
-            },
+            // .Dot => {
+            //     try this.typecheckDot(binary, t_lhs, t_rhs.?);
+            // },
             .ExclusiveRange => {
                 if (t_lhs.typ.? == .Int and t_rhs.?.typ.? == .Int) {
                     binary.typ = .Any; // @TODO: Make Range type
                 } else {
                     return raise(error.TypeError, &this.err_msg, binary.token.location, "`..` requires its operands to be Int values.", .{});
+                }
+            },
+            .NoneOr => {
+                // @TODO:
+                // Check that rhs won't be null
+                //
+
+                switch (t_lhs.typ.?) {
+                    .Union => |union_index| {
+                        const union_type = this.interp.union_types.items[union_index];
+                        if (!union_type.isSuperset(&[_]Type{.None})) {
+                            return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`??` requires it's first operand to be a potentially `None` value but encountered a `{}` value.", .{t_lhs.typ.?});
+                        }
+
+                        // @TODO:
+                        // Unionize lhs type with rhs type.
+                        //
+
+                        binary.typ = try this.unionTypeWithVariantsRemoved(union_type, &[_]Type{.None});
+                    },
+                    .None => {
+                        binary.typ = t_rhs.?.typ.?;
+                    },
+                    else => return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`??` requires it's first operand to ba a potentially `None` value but encountered a `{}` value.", .{t_lhs.typ.?}),
                 }
             },
             else => return raise(error.InternalError, &this.err_msg, binary.token.location, "`{}` is not a binary node.", .{binary.kind}),
@@ -643,12 +714,40 @@ pub const Typer = struct {
         }
     }
 
-    fn typecheckDot(this: *This, dot: *AstBinary, lhs: *Ast, rhs: *Ast) !void {
-        _ = this;
-        _ = dot;
-        _ = lhs;
-        _ = rhs;
-        todo("Implement typecheckDot().");
+    fn typecheckDot(this: *This, dot: *AstBinary) !*AstBinary {
+        const t_lhs = (try this.typecheckNode(dot.lhs)).?;
+
+        std.debug.print("rhs.kind = {}", .{dot.rhs.kind});
+        std.debug.assert(dot.rhs.kind == .Ident);
+        const ident = dot.rhs.downcast(AstIdent);
+
+        switch (t_lhs.typ.?) {
+            .Tuple => |tuple_index| {
+                const tuple_type = this.interp.tuple_types.items[tuple_index];
+
+                // find index of field
+                var field_index: ?usize = null;
+                for (tuple_type.fields) |field, i| {
+                    if (std.mem.eql(u8, field.name, ident.ident)) {
+                        field_index = i;
+                        break;
+                    }
+                }
+
+                if (field_index) |idx| {
+                    dot.lhs = t_lhs;
+                    dot.typ = tuple_type.fields[idx].typ;
+                    return dot;
+                }
+            },
+            .Tag => |tag_index| {
+                _ = tag_index;
+                todo("Implement typechecking dot for tuples.");
+            },
+            else => {},
+        }
+
+        todo("Implement typechecking dot for associated functions.");
     }
 
     fn typecheckIf(this: *This, _if: *AstIf) !*AstIf {
@@ -715,7 +814,6 @@ pub const Typer = struct {
         var var_type = t_init.typ.?;
         if (_var.specified_type) |specified_type_signature| {
             const specified_type = try this.typecheckTypeSignature(specified_type_signature);
-            std.debug.print("::: init typ = {}\n::: spec typ = {}\n", .{ t_init.typ.?, specified_type });
             if (!t_init.typ.?.compat(specified_type)) {
                 return raise(error.TypeError, &this.err_msg, t_init.token.location, "Cannot initialize a variable with a `{}` value when it was specified to be a `{}` value.", .{ t_init.typ.?, specified_type });
             }
@@ -808,6 +906,10 @@ pub const Typer = struct {
 
                 typ = try this.unionizeTypes(variants);
             },
+            .Optional => |inner_sig| {
+                const inner_type = try this.typecheckTypeSignature(inner_sig);
+                typ = try this.unionizeTypes(&[_]Type{inner_type, .None});
+            }
         }
 
         return typ;

@@ -105,6 +105,8 @@ pub const Token = struct {
             .Dot => .Call,
             .DoubleDot => .Range,
             .Space => .Call,
+            .QuestionMark => .Unary,
+            .DoubleQuestionMark => .NoneOr,
 
             // Keywords
             .Do => .None,
@@ -166,6 +168,8 @@ pub const Token = struct {
                 .Dot => try writer.print(".", .{}),
                 .DoubleDot => try writer.print("..", .{}),
                 .Space => try writer.print(" ", .{}),
+                .QuestionMark => try writer.print("?", .{}),
+                .DoubleQuestionMark => try writer.print("??", .{}),
 
                 // Keywords
                 .Do => try writer.print("do", .{}),
@@ -227,6 +231,8 @@ pub const TokenKind = enum {
     Dot,
     DoubleDot,
     Space,
+    QuestionMark,
+    DoubleQuestionMark,
 
     // Keywords
     Do,
@@ -283,6 +289,8 @@ pub const TokenData = union(TokenKind) {
     Dot,
     DoubleDot,
     Space,
+    QuestionMark,
+    DoubleQuestionMark,
 
     // Keywords
     Do,
@@ -342,6 +350,8 @@ pub const TokenData = union(TokenKind) {
             .Dot => _ = try writer.write(".Dot"),
             .DoubleDot => _ = try writer.write(".DoubleDot"),
             .Space => _ = try writer.write(".Space"),
+            .QuestionMark => _ = try writer.write(".QuestionMark"),
+            .DoubleQuestionMark => _ = try writer.write(".DoubleQuestionMark"),
 
             // Keywords
             .Do => _ = try writer.write(".Do"),
@@ -365,6 +375,7 @@ pub const TokenPrecedence = enum {
     None,
     Assignment, // = += -= *= /= &= etc.
     Colon, // :
+    NoneOr, // ??
     Cast, // as
     Range, // .. ...
     Or, // ||
@@ -464,6 +475,7 @@ pub const Tokenizer = struct {
             '<' => return true,
             '>' => return true,
             '.' => return true,
+            '?' => return true,
             else => return isIdentBegin(c) and this.tokenizeIdentOrKeyword().data != .Ident,
         }
     }
@@ -502,7 +514,8 @@ pub const Tokenizer = struct {
             .RightAngle,
             .Dot,
             .DoubleDot,
-            .Space => true,
+            .Space,
+            .DoubleQuestionMark => true,
 
             // Keywords
             .Do,
@@ -814,6 +827,10 @@ pub const Tokenizer = struct {
             else
                 Token.init(this.indentation, .Dot, location),
             ' ' => Token.init(this.indentation, .Space, location),
+            '?' => if (this.nextIfEq('?'))
+                Token.init(this.indentation, .DoubleQuestionMark, location)
+            else
+                Token.init(this.indentation, .QuestionMark, location),
             else => |c| raise(error.ParseError, this.err_msg, location, "Invalid operator `{u}`.", .{c}),
         };
     }
@@ -1054,12 +1071,21 @@ pub const Parser = struct {
 
             // Delimeters
             .LeftParen => {
+                const old_pcse = this.parsing_comma_separated_expressions;
+                this.parsing_comma_separated_expressions = false;
+                defer this.parsing_comma_separated_expressions = old_pcse;
+
                 const expr = try this.parseExpression();
                 _ = try this.expect(.RightParen, "Expected `)` to terminate parenthesized expression.");
                 return expr;
             },
-            // .LeftCurly => return (try this.parseBlockNoExpect(token)).asAst(),
-            .LeftSquare => return (try this.parseList(token)).asAst(),
+            .LeftSquare => {
+                const old_pcse = this.parsing_comma_separated_expressions;
+                this.parsing_comma_separated_expressions = false;
+                defer this.parsing_comma_separated_expressions = old_pcse;
+
+                return (try this.parseList(token)).asAst();
+            },
 
             // Operators
             .Bang => {
@@ -1140,6 +1166,12 @@ pub const Parser = struct {
             .DoubleDot => {
                 return (try this.parseBinary(prec, .ExclusiveRange, token, previous)).asAst();
             },
+            .QuestionMark => {
+                return (try this.createNode(AstUnary, .{ .Unwrap, token, previous })).asAst();
+            },
+            .DoubleQuestionMark => {
+                return (try this.parseBinary(prec, .NoneOr, token, previous)).asAst();
+            },
 
             .Space => {
                 const terminator = if (this.parsing_comma_separated_expressions) TokenKind.Comma else TokenKind.Newline;
@@ -1157,6 +1189,10 @@ pub const Parser = struct {
                 return call.asAst();
             },
             .LeftSquare => {
+                const old_pcse = this.parsing_comma_separated_expressions;
+                this.parsing_comma_separated_expressions = false;
+                defer this.parsing_comma_separated_expressions = old_pcse;
+
                 const expr = (try this.parseBinary(.Assignment, .Index, token, previous)).asAst();
                 _ = try this.expect(.RightSquare, "Expected `]` to terminate index operator.");
                 return expr;
@@ -1219,9 +1255,9 @@ pub const Parser = struct {
     fn parseCommaSeparatedExpressions(this: *This, terminator: TokenKind, token: Token) !*AstBlock {
         var nodes = ArrayListUnmanaged(*Ast){};
 
-        const old_pce = this.parsing_comma_separated_expressions;
+        const old_pcse = this.parsing_comma_separated_expressions;
         this.parsing_comma_separated_expressions = true;
-        defer this.parsing_comma_separated_expressions = old_pce;
+        defer this.parsing_comma_separated_expressions = old_pcse;
 
         while (true) {
             if (terminator != .Newline) try this.skipNewlines();
@@ -1491,6 +1527,8 @@ pub const Parser = struct {
             sig = try this.parseTupleTypeSignature(paren);
         } else if (try this.match(.LeftSquare)) |square| {
             sig = try this.parseTagTypeSignature(square);
+        } else if (try this.match(.QuestionMark)) |qmark| {
+            sig = try this.parseOptionalTypeSignature(qmark);
         } else {
             return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected a type signature.", .{});
         }
@@ -1583,6 +1621,13 @@ pub const Parser = struct {
 
         var node = try this.allocator.create(AstTypeSignature);
         node.* = AstTypeSignature.init(previous.token, AstTypeSignature.Data{ .Union = .{ .variants = variant_signautres.items }});
+        return node;
+    }
+
+    fn parseOptionalTypeSignature(this: *This, token: Token) !*AstTypeSignature {
+        const some_variant = try this.parseTypeSignature(true);
+        var node = try this.allocator.create(AstTypeSignature);
+        node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Optional = some_variant });
         return node;
     }
 

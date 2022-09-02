@@ -31,7 +31,7 @@ pub const Ast = struct {
             // Unary
             .Negate,
             .Not,
-            => try writer.print("{}", .{this.downcastConst(AstUnary)}),
+            .Unwrap => try writer.print("{}", .{this.downcastConst(AstUnary)}),
 
             // Binary
             .Assign,
@@ -49,7 +49,7 @@ pub const Ast = struct {
             .Call,
             .Dot,
             .ExclusiveRange,
-            => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+            .NoneOr => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
             .Block, .Comma, .List => try writer.print("{}", .{this.downcastConst(AstBlock)}),
@@ -87,6 +87,7 @@ pub const AstKind = enum {
     // Unary
     Negate,
     Not,
+    Unwrap,
 
     // Binary
     Assign,
@@ -104,6 +105,7 @@ pub const AstKind = enum {
     Call,
     Dot,
     ExclusiveRange,
+    NoneOr,
 
     // Blocks
     Block,
@@ -506,6 +508,7 @@ pub const AstTypeSignature = struct {
         Tuple: TupleData,
         Tag: TagData,
         Union: UnionData,
+        Optional: *AstTypeSignature,
     };
 
     pub const TupleData = struct {

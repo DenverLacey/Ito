@@ -260,7 +260,16 @@ pub const UnionTypeDefinition = struct {
 
     const This = @This();
 
-    pub fn isSuperset(this: *const This, other: []Type) bool {
+    pub fn isSuperset(this: *const This, other: []const Type) bool {
+        // const other = switch (other_type) {
+        //     .Union => |other_index| blk: {
+        //         const interp = Interpreter.get();
+        //         const other_union = interp.union_types.items[other_index];
+        //         break :blk other_union.variants;
+        //     },
+        //     else => &[_]Type{other_type},
+        // };
+
         var superset = true;
         for (other) |other_variant| {
             var found = false;
@@ -375,8 +384,37 @@ pub const Value = union(ValueKind) {
                 .Type => |other_typ| typ.eql(other_typ),
                 else => false,
             },
-            .Tuple => switch (other) {
-                .Tuple => unreachable, // @TODO
+            .Tuple => |value| switch (other) {
+                .Tuple => |other_value| blk: {
+                    if (!value.typ.eql(other_value.typ))
+                        break :blk false;
+                    
+                    // @NOTE:
+                    // Using the values slice might be
+                    // error prone depending on if the
+                    // order of the values isn't 
+                    // guarenteed but i think it is
+                    // because if they have the same
+                    // type then the hashes for the fields
+                    // should be the same.
+                    //
+
+                    const fields = value.fields.values();
+                    const other_fields = other_value.fields.values();
+                    std.debug.assert(fields.len == other_fields.len);
+
+                    var i: usize = 0;
+                    while (i < fields.len) : (i += 1) {
+                        const field = fields[i];
+                        const other_field = other_fields[i];
+
+                        if (!field.eql(other_field)) {
+                            break :blk false;
+                        }
+                    }
+
+                    break :blk true;
+                },
                 else => false,
             },
             .Tag => |value| switch (other) {
