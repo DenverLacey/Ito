@@ -6,7 +6,9 @@ const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
 const Utf8View = std.unicode.Utf8View;
 const Utf8Iterator = std.unicode.Utf8Iterator;
 
-const Interpreter = @import("interpreter.zig").Interpreter;
+const interpreter = @import("interpreter.zig");
+const Interpreter = interpreter.Interpreter;
+const LambdaDefinition = interpreter.LambdaDefinition;
 
 const CodeLocation = @import("parser.zig").CodeLocation;
 
@@ -25,6 +27,7 @@ const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
 const AstDef = ast.AstDef;
+const AstInstantiateLambda = ast.AstInstantiateLambda;
 const AstParam = ast.AstParam;
 const AstVarBlock = ast.AstVarBlock;
 const AstVar = ast.AstVar;
@@ -102,12 +105,17 @@ pub const VariableStack = struct {
     }
 };
 
+const CallFrame = struct {
+    start: usize,
+};
+
 pub const Evaluator = struct {
     allocator: Allocator,
     interp: *Interpreter,
     gc: GarbageCollector,
     scopes: ArrayListUnmanaged(Scope),
     stack: VariableStack,
+    call_frames: ArrayListUnmanaged(CallFrame),
     err_msg: ErrMsg,
 
     const This = @This();
@@ -122,6 +130,7 @@ pub const Evaluator = struct {
             .gc = GarbageCollector.init(interp.allocator),
             .scopes = scopes,
             .stack = VariableStack{},
+            .call_frames = ArrayListUnmanaged(CallFrame){},
             .err_msg = ErrMsg{},
         };
     }
@@ -157,15 +166,30 @@ pub const Evaluator = struct {
         this.gc.collectGarbage(this.stack.values.items);
     }
 
+    fn pushCallFrame(this: *This) !void {
+        const new_frame = CallFrame{ .start = this.stack.values.items.len };
+        try this.call_frames.append(this.allocator, new_frame);
+    }
+
+    fn popCallFrame(this: *This) void {
+        _ = this.call_frames.pop();
+    }
+
+    fn currentFrame(this: *This) ?CallFrame {
+        if (this.call_frames.items.len == 0) {
+            return null;
+        }
+        return this.call_frames.items[this.call_frames.items.len - 1];
+    }
+
     pub fn evaluate(this: *This, nodes: []*Ast) anyerror!void {
         for (nodes) |node| {
             const v = try this.evaluateNode(node);
             if (DEBUG_PRINT_BASE_NODE_RESULTS) {
-                std.debug.print("?> {}", .{v});
                 if (node.typ) |typ| {
-                    std.debug.print(" :: {}", .{typ});
+                    std.debug.print("?> {} :: {}", .{v, typ});
+                    std.debug.print("\n", .{});
                 }
-                std.debug.print("\n", .{});
             }
         }
     }
@@ -238,8 +262,11 @@ pub const Evaluator = struct {
                 return try this.evaluateFor(_for);
             },
             .Def => {
-                const def = node.downcast(AstDef);
-                try this.evaluateDef(def);
+                return raise(error.InternalError, &this.err_msg, node.token.location, "AstDef node reached evaluation.", .{});
+            },
+            .InstantiateLambda => {
+                const lambda = node.downcast(AstInstantiateLambda);
+                try this.evaluateInstantiateLambda(lambda);
                 return Value.None;
             },
             // .Extend => blk: {
@@ -274,7 +301,9 @@ pub const Evaluator = struct {
                 return this.stack.values.items[get.index];
             },
             .GetVar => {
-                todo("Implement evaluation of GetVar nodes");
+                const get = node.downcast(AstGetVar);
+                const frame = this.currentFrame() orelse return raise(error.InternalError, &this.err_msg, get.token.location, "Attempt to evaluate GetVar node without a call frame.", .{});
+                return this.stack.values.items[get.index + frame.start];
             },
             .GetType => {
                 const get = node.downcast(AstGetType);
@@ -595,22 +624,25 @@ pub const Evaluator = struct {
     fn setupScopeForClosureCall(this: *This, scope: *Scope, closure: *Closure, args: *AstBlock) anyerror!void {
         try this.injectClosedValuesIntoScope(closure, scope);
 
-        if (args.nodes.len != closure.params.len) {
-            return raise(error.RuntimeError, &this.err_msg, args.token.location, "Inccorect number of arguments! `{s}` expects {} arguments but was given {}.", .{ closure.name, closure.params.len, args.nodes.len });
+        if (args.nodes.len != closure.type_def.parameters.len) {
+            return raise(error.RuntimeError, &this.err_msg, args.token.location, "Inccorect number of arguments! `{s}` expects {} arguments but was given {}.", .{ closure.name, closure.type_def.parameters.len, args.nodes.len });
         }
 
         var i: usize = 0;
-        while (i < closure.params.len) : (i += 1) {
-            const arg_name = closure.params[i].name;
+        while (i < closure.type_def.parameters.len) : (i += 1) {
+            const arg_name = closure.type_def.parameters[i].name;
             const arg_value = try this.evaluateNode(args.nodes[i]);
             try this.stack.pushVariable(this.allocator, scope, arg_name, arg_value);
         }
     }
 
     fn injectClosedValuesIntoScope(this: *This, closure: *Closure, scope: *Scope) anyerror!void {
-        var it = closure.closed_values.iterator();
-        while (it.next()) |entry| {
-            try this.stack.pushVariable(this.allocator, scope, entry.key_ptr.*, entry.value_ptr.*);
+        var i: usize = 0;
+        while (i < closure.closed_values.len) : (i += 1) {
+            const name = closure.closed_value_names[i];
+            const value = closure.closed_values[i];
+
+            try this.stack.pushVariable(this.allocator, scope, name, value);
         }
     }
 
@@ -627,6 +659,10 @@ pub const Evaluator = struct {
         args_node: *AstBlock,
     ) anyerror!Value {
         var closure_scope = Scope.init(this.globalScope());
+        
+        try this.pushCallFrame();
+        defer this.popCallFrame();
+
         try this.stack.pushVariable(this.allocator, &closure_scope, closure.name, Value{ .Closure = closure });
 
         try this.setupScopeForClosureCall(&closure_scope, closure, args_node);
@@ -645,17 +681,17 @@ pub const Evaluator = struct {
         switch (typ) {
             .Tuple => |tuple_index| {
                 const tuple_type = this.interp.tuple_types.items[tuple_index];
-                return this.typecheckCallTupleType(typ, tuple_type, args);
+                return this.evaluateCallTupleType(typ, tuple_type, args);
             },
             .Tag => |tag_index| {
                 const tag_type = this.interp.tag_types.items[tag_index];
-                return this.typecheckCallTagType(typ, tag_type, args);
+                return this.evaluateCallTagType(typ, tag_type, args);
             },
             else => unreachable,
         }
     }
 
-    fn typecheckCallTupleType(this: *This, typ: Type, defn: TupleTypeDefinition, args: *AstBlock) anyerror!Value {
+    fn evaluateCallTupleType(this: *This, typ: Type, defn: TupleTypeDefinition, args: *AstBlock) anyerror!Value {
         if (args.nodes.len != defn.fields.len) {
             return raise(error.RuntimeError, &this.err_msg, args.token.location, "Incorrect number of arguments! Expected {} but found {}.", .{ defn.fields.len, args.nodes.len });
         }
@@ -672,12 +708,12 @@ pub const Evaluator = struct {
         return Value{ .Tuple = allocated_tuple };
     }
 
-    fn typecheckCallTagType(this: *This, typ: Type, defn: TagTypeDefinition, args: *AstBlock) anyerror!Value {
+    fn evaluateCallTagType(this: *This, typ: Type, defn: TagTypeDefinition, args: *AstBlock) anyerror!Value {
         _ = this;
         _ = typ;
         _ = defn;
         _ = args;
-        todo("Implement typecheckCallTagType().");
+        todo("Implement evaluateCallTagType().");
     }
 
     fn evaluateDot(this: *This, instance_node: *Ast, field_ident_node: *AstIdent) anyerror!Value {
@@ -782,7 +818,7 @@ pub const Evaluator = struct {
     fn evaluateAssignVariable(this: *This, get: *AstGetVar, expr: *Ast) anyerror!void {
         const index = switch (get.kind) {
             .GetGlobal => get.index,
-            .GetVar => todo("Implement assign for GetVar nodes."),
+            .GetVar => (this.currentFrame() orelse return raise(error.InternalError, &this.err_msg, get.token.location, "Attempt to evaluate assignment to GetVar node without a call frame.", .{})).start + get.index,
             else => unreachable,
         };
 
@@ -1041,28 +1077,57 @@ pub const Evaluator = struct {
     //     return rval;
     // }
 
-    fn evaluateDef(this: *This, def: *AstDef) anyerror!void {
-        const closure = try this.createDefClosure(def);
+    // fn evaluateDef(this: *This, def: *AstDef) anyerror!void {
+    //     const closure = try this.createDefClosure(def);
+    //     const closure_value = Value{ .Closure = closure };
+    //     try this.stack.pushVariable(this.allocator, this.currentScope(), def.ident.ident, closure_value);
+    // }
+
+    fn evaluateInstantiateLambda(this: *This, lambda: *AstInstantiateLambda) anyerror!void {
+        const def = this.interp.lambdas.items[lambda.lambda_index];
+
+        const closure = try this.instantiateLambda(def);
         const closure_value = Value{ .Closure = closure };
         try this.stack.pushVariable(this.allocator, this.currentScope(), def.name, closure_value);
     }
 
-    fn createDefClosure(this: *This, def: *AstDef) anyerror!*Closure {
-        // @TODO:
-        // Find closure values and close them.
-        //
+    fn instantiateLambda(this: *This, lambda: LambdaDefinition) anyerror!*Closure {
+        var closed_values = ArrayListUnmanaged(Value){};
+        errdefer closed_values.deinit(this.allocator);
 
-        var params = try ArrayListUnmanaged(Closure.Parameter).initCapacity(this.allocator, def.params.len);
-        for (def.params) |param_node| {
-            const ident = param_node.ident;
-            const param = Closure.Parameter{ .name = ident.ident };
-            try params.append(this.allocator, param);
+        for (lambda.closed_values) |cv| {
+            var index = cv.index;
+            if (!cv.global) {
+                const frame = this.currentFrame() orelse return raise(error.InternalError, &this.err_msg, null, "Attempt to retrieve non-global closed value ({}) without a call frame", .{index});
+                index += frame.start;
+            }
+
+            const value = this.stack.values.items[index];
+            try closed_values.append(this.allocator, value);
         }
 
-        const closed_values = StringArrayHashMapUnmanaged(Value){};
-
-        return try this.gc.copyClosure(Closure.init(def.name, params.items, def.body, closed_values));
+        const closure = Closure.init(lambda.name, lambda.type_def, lambda.code, closed_values.items, lambda.closed_value_names);
+        return try this.gc.copyClosure(closure);
     }
+
+    // fn createDefClosure(this: *This, def: *AstDef) anyerror!*Closure {
+    //     // @TODO:
+    //     // Find closure values and close them.
+    //     //
+
+    //     // var params = try ArrayListUnmanaged(Closure.Parameter).initCapacity(this.allocator, def.params.len);
+    //     // for (def.params) |param_node| {
+    //     //     const ident = param_node.ident;
+    //     //     const param = Closure.Parameter{ .name = ident.ident };
+    //     //     try params.append(this.allocator, param);
+    //     // }
+
+    //     const closed_values = StringArrayHashMapUnmanaged(Value){};
+
+    //     const type_def = def.type_def orelse return raise(error.InternalError, &this.err_msg, def.token.location, "AstDef reached evaluation without a LambdaTypeDefinition.", .{});
+
+    //     return try this.gc.copyClosure(Closure.init(def.ident.ident, type_def, def.body, closed_values));
+    // }
 
     fn evaluateVar(this: *This, _var: *AstVar) anyerror!void {
         const var_ident = _var.ident.ident;

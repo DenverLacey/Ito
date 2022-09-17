@@ -1355,11 +1355,8 @@ pub const Parser = struct {
     }
 
     fn parseDef(this: *This, token: Token) !*AstDef {
-        const ident_token = try this.skipExpect(.Ident, "Expected an identifer after keyword `def`.");
-        const ident = switch (ident_token.data) {
-            .Ident => |id| id,
-            else => unreachable,
-        };
+        try this.skipNewlines();
+        const ident = (try this.parseIdent()) orelse return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `def` keyword.", .{});
 
         _ = try this.skipExpect(.LeftParen, "Expected `(` to begin parameter list.");
 
@@ -1529,12 +1526,14 @@ pub const Parser = struct {
             sig = try this.parseTagTypeSignature(square);
         } else if (try this.match(.QuestionMark)) |qmark| {
             sig = try this.parseOptionalTypeSignature(qmark);
+        } else if (try this.match(.Pipe)) |pipe| {
+            sig = try this.parseUnionTypeSignature(pipe, null);
         } else {
             return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected a type signature.", .{});
         }
 
         if (parse_unions and (try this.match(.Pipe)) != null) {
-            sig = try this.parseUnionTypeSignature(sig);
+            sig = try this.parseUnionTypeSignature(sig.token, sig);
         }
 
         return sig;
@@ -1606,21 +1605,23 @@ pub const Parser = struct {
         return node;
     }
 
-    fn parseUnionTypeSignature(this: *This, previous: *AstTypeSignature) !*AstTypeSignature {
+    fn parseUnionTypeSignature(this: *This, token: Token, previous: ?*AstTypeSignature) !*AstTypeSignature {
         var variant_signautres = ArrayListUnmanaged(*AstTypeSignature){};
         errdefer variant_signautres.deinit(this.allocator);
 
-        try variant_signautres.append(this.allocator, previous);
+        if (previous) |p| {
+            try variant_signautres.append(this.allocator, p);
+        }
 
         while (!try this.checkEof()) {
             const variant = try this.parseTypeSignature(false);
             try variant_signautres.append(this.allocator, variant);
 
-            if ((try this.match(.Pipe)) == null) break;
+            if ((try this.skipMatch(.Pipe)) == null) break;
         }     
 
         var node = try this.allocator.create(AstTypeSignature);
-        node.* = AstTypeSignature.init(previous.token, AstTypeSignature.Data{ .Union = .{ .variants = variant_signautres.items }});
+        node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Union = .{ .variants = variant_signautres.items }});
         return node;
     }
 

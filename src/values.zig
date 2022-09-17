@@ -226,7 +226,25 @@ pub const Type = union(enum) {
                     }
                 }
             },
-            .Lambda => |_| todo("Implement printing lambda type values."),
+            .Lambda => |index| {
+                const lambda_type = interp.lambda_types.items[index];
+
+                _ = try writer.write("(");
+
+                for (lambda_type.parameters) |param, i| {
+                    if (param.typ == .Any) {
+                        try writer.print("{s}", .{param.name});
+                    } else {
+                        try writer.print("{}", .{param.typ});
+                    }
+
+                    if (i < lambda_type.parameters.len - 1) {
+                        _ = try writer.write(", ");
+                    }
+                }
+
+                try writer.print(") -> {}", .{lambda_type.returns});
+            },
         }
     }
 };
@@ -427,7 +445,13 @@ pub const Value = union(ValueKind) {
     pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         switch (this.*) {
             .None => try writer.print("None", .{}),
-            .Bool => |value| try writer.print("{s}", .{if (value) @as([]const u8, "True") else @as([]const u8, "False")}),
+            .Bool => |value| {
+                if (value) {
+                    _ = try writer.write("True");
+                } else {
+                    _ = try writer.write("False");
+                }
+            },
             .Char => |value| try writer.print("{u}", .{value}),
             .Int => |value| try writer.print("{}", .{value}),
             .Num => |value| try writer.print("{d}", .{value}),
@@ -501,57 +525,59 @@ pub const List = ArrayListUnmanaged(Value);
 
 pub const Closure = struct {
     name: []const u8,
-    params: []Parameter,
+    type_def: LambdaTypeDefinition,
     code: *AstBlock,
-    closed_values: StringArrayHashMapUnmanaged(Value),
+    closed_values: []Value,
+    closed_value_names: [][]const u8,
 
     const This = @This();
 
-    pub const Parameter = struct {
-        name: []const u8,
-    };
-
     pub fn init(
         name: []const u8,
-        params: []Parameter,
+        type_def: LambdaTypeDefinition,
         code: *AstBlock,
-        closed_values: StringArrayHashMapUnmanaged(Value),
+        closed_values: []Value,
+        closed_value_names: [][]const u8,
     ) This {
-        return This{ .name = name, .params = params, .code = code, .closed_values = closed_values };
+        return This{
+            .name = name,
+            .type_def = type_def,
+            .code = code,
+            .closed_values = closed_values,
+            .closed_value_names = closed_value_names,
+        };
     }
 
-    pub fn deinit(this: *This, allocator: Allocator) void {
-        allocator.free(this.params);
-    }
+    pub fn deinit(_: *This, _: Allocator) void {}
 
-    pub fn makeBound(
-        this: *This,
-        allocator: Allocator,
-        receiver: Value,
-        location: CodeLocation,
-        out_err_msg: *ErrMsg,
-    ) !This {
-        var bound: This = undefined;
-        bound.name = this.name;
-        bound.code = this.code;
+    // pub fn makeBound(
+    //     this: *This,
+    //     allocator: Allocator,
+    //     receiver: Value,
+    //     location: CodeLocation,
+    //     out_err_msg: *ErrMsg,
+    // ) !This {
+    //     var bound: This = undefined;
+    //     bound.name = this.name;
+    //     bound.code = this.code;
 
-        bound.params = try allocator.alloc(Parameter, this.params.len - 1);
-        std.mem.copy(Parameter, bound.params, this.params[1..]);
+    //     bound.params = try allocator.alloc(Parameter, this.params.len - 1);
+    //     std.mem.copy(Parameter, bound.params, this.params[1..]);
 
-        bound.closed_values = .{};
-        bound.closed_values.putNoClobber(allocator, this.params[0].name, receiver) catch unreachable;
+    //     bound.closed_values = .{};
+    //     bound.closed_values.putNoClobber(allocator, this.params[0].name, receiver) catch unreachable;
 
-        var it = this.closed_values.iterator();
-        while (it.next()) |entry| {
-            if (bound.closed_values.contains(entry.key_ptr.*)) {
-                return raise(error.RuntimeError, out_err_msg, location, "`{s}` appears in closure `{s}` more than once.", .{ entry.key_ptr.*, this.name });
-            }
+    //     var it = this.closed_values.iterator();
+    //     while (it.next()) |entry| {
+    //         if (bound.closed_values.contains(entry.key_ptr.*)) {
+    //             return raise(error.RuntimeError, out_err_msg, location, "`{s}` appears in closure `{s}` more than once.", .{ entry.key_ptr.*, this.name });
+    //         }
 
-            try bound.closed_values.putNoClobber(allocator, entry.key_ptr.*, entry.value_ptr.*);
-        }
+    //         try bound.closed_values.putNoClobber(allocator, entry.key_ptr.*, entry.value_ptr.*);
+    //     }
 
-        return bound;
-    }
+    //     return bound;
+    // }
 
     pub fn format(
         this: *const This,
@@ -561,10 +587,9 @@ pub const Closure = struct {
     ) @TypeOf(writer).Error!void {
         try writer.print("{s}(", .{this.name});
 
-        var i: usize = 0;
-        while (i < this.params.len) : (i += 1) {
-            try writer.print("{s}", .{this.params[i].name});
-            if (i + 1 < this.params.len) {
+        for (this.type_def.parameters) |param, i| {
+            try writer.print("{s}", .{param.name});
+            if (i + 1 < this.type_def.parameters.len) {
                 try writer.print(", ", .{});
             }
         }

@@ -1,7 +1,11 @@
 const std = @import("std");
+
 const Token = @import("parser.zig").Token;
 const Char = @import("values.zig").Char;
-const Type = @import("values.zig").Type;
+
+const values = @import("values.zig");
+const Type = values.Type;
+const LambdaTypeDefinition = values.LambdaTypeDefinition;
 
 pub const Ast = struct {
     kind: AstKind,
@@ -70,6 +74,7 @@ pub const Ast = struct {
             .GetVar => try writer.print("{}", .{this.downcastConst(AstGetVar)}),
             .GetType => try writer.print("{}", .{this.downcastConst(AstGetType)}),
             .GetTag => try writer.print("{}", .{this.downcastConst(AstGetTag)}),
+            .InstantiateLambda => try writer.print("{}", .{this.downcastConst(AstInstantiateLambda)}),
         }
     }
 };
@@ -128,6 +133,7 @@ pub const AstKind = enum {
     GetVar,
     GetType,
     GetTag,
+    InstantiateLambda,
 };
 
 pub const AstLiteral = struct {
@@ -367,22 +373,48 @@ pub const AstDef = struct {
     kind: AstKind,
     token: Token,
     typ: ?Type,
-    name: []const u8,
+    ident: *AstIdent,
     params: []*AstParam,
     ret_type: ?*AstTypeSignature,
     body: *AstBlock,
 
+    type_def: ?LambdaTypeDefinition,
+
     const This = @This();
 
-    pub fn init(token: Token, name: []const u8, params: []*AstParam, ret_type: ?*AstTypeSignature, body: *AstBlock) This {
+    pub fn init(token: Token, ident: *AstIdent, params: []*AstParam, ret_type: ?*AstTypeSignature, body: *AstBlock) This {
         return This{ 
             .kind = .Def, 
             .token = token, 
             .typ = null, 
-            .name = name, 
+            .ident = ident,
             .params = params, 
             .ret_type = ret_type, 
-            .body = body
+            .body = body,
+            .type_def = null,
+        };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstInstantiateLambda = struct {
+    kind: AstKind,
+    token: Token,
+    typ: ?Type,
+
+    lambda_index: usize,
+
+    const This = @This();
+
+    pub fn init(token: Token, lambda_index: usize) This {
+        return This{
+            .kind = .InstantiateLambda,
+            .token = token,
+            .typ = null,
+            .lambda_index = lambda_index,
         };
     }
 

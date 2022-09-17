@@ -1,7 +1,12 @@
 # module Main
 
-#def add(a : Num, b : Num) : Num =
-#    a + b
+
+def add(a: Num, b: Num): Num =
+  a + b
+add
+
+var sum = add 3.0, 4.0
+sum
 
 
 type 
@@ -22,9 +27,14 @@ type
     , Right
     ]
 
+  Namelike =
+    | Fullname
+    | Str
+
 Person
 Fullname
 Direction
+Namelike
 
 
 var
@@ -86,10 +96,12 @@ var numbers = [1, 2, 3, 4, "five", (Fullname "Six", "Seven")]
 numbers
 
 var a = True
+a
 var b = False
+b
 a and b
 
-var x : Int|Char = 80085
+var x: Int|Char = 80085
 x
 x = 'B'
 x
@@ -101,7 +113,7 @@ string
 #   if matrix is Str
 #     matrix
 #   else
-#     "Burgers"
+#     "Nebuchadnezzar"
 # other_string
 
 # This is a thing but is commented out because it crashes the program

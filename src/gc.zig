@@ -63,10 +63,10 @@ pub const GarbageCollector = struct {
         }
         this.lists.deinit(this.allocator);
 
-        for (this.closures.items) |closure| {
-            closure.value.deinit(this.allocator);
-            this.allocator.destroy(closure.value);
-        }
+        // for (this.closures.items) |closure| {
+        //     closure.value.deinit(this.allocator);
+        //     this.allocator.destroy(closure.value);
+        // }
         this.closures.deinit(this.allocator);
 
         for (this.tuples.items) |tuple| {
@@ -205,7 +205,7 @@ pub const GarbageCollector = struct {
                 for (this.closures.items) |*c| {
                     if (value == c.value) {
                         if (!c.marked)
-                            this.markVariables(c.value.closed_values.values());
+                            this.markVariables(c.value.closed_values);
                         c.marked = true;
                         break;
                     }

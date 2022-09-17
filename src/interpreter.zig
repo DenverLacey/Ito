@@ -5,7 +5,11 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const parser = @import("parser.zig");
 const Parser = parser.Parser;
 const Tokenizer = parser.Tokenizer;
+
+const AstBlock = @import("ast.zig").AstBlock;
+
 const Typer = @import("typer.zig").Typer;
+
 const Evaluator = @import("evaluator.zig").Evaluator;
 
 const values = @import("values.zig");
@@ -20,8 +24,23 @@ const ErrMsg = @import("errors.zig").ErrMsg;
 
 var interpreter = Interpreter{};
 
+pub const LambdaDefinition = struct {
+    name: []const u8,
+    type_def: LambdaTypeDefinition,
+    code: *AstBlock,
+    closed_values: []ClosedValueIndex,
+    closed_value_names: [][]const u8,
+
+    pub const ClosedValueIndex = struct {
+        index: usize,
+        global: bool,
+    };
+};
+
 pub const Interpreter = struct {
     allocator: Allocator = undefined,
+
+    lambdas: ArrayListUnmanaged(LambdaDefinition) = .{},
 
     // Composite Types
     list_types: ArrayListUnmanaged(ListTypeDefinition) = .{},
@@ -34,6 +53,14 @@ pub const Interpreter = struct {
 
     pub fn get() *This {
         return &interpreter;
+    }
+
+    pub fn addLambda(this: *This, lambda: LambdaDefinition) !usize {
+        const lambda_index = this.lambdas.items.len;
+
+        try this.lambdas.append(this.allocator, lambda);
+
+        return lambda_index;
     }
 
     pub fn findOrAddListType(this: *This, item_type: Type) !Type {
@@ -120,6 +147,36 @@ pub const Interpreter = struct {
         }
 
         return Type{ .Tag = typ.? };
+    }
+
+    pub fn findOrAddLambdaType(this: *This, parameters: []LambdaTypeDefinition.Parameter, returns: Type) !Type {
+
+        var found_index: ?usize = null;
+        for (this.lambda_types.items) |lambda_type, lambda_index| {
+            if (!lambda_type.returns.eql(returns)) continue;
+
+            var not_eql = false;
+            for (lambda_type.parameters) |param, i| {
+                if (!param.typ.eql(parameters[i].typ)) {
+                    not_eql = true;
+                    break;
+                }
+            }
+            if (not_eql) continue;
+
+            found_index = lambda_index;
+            break;
+        }
+
+        if (found_index) |index| {
+            this.allocator.free(parameters);
+            return Type{ .Lambda = @intCast(u32, index) };
+        }
+
+        const lambda_def = LambdaTypeDefinition{ .parameters = parameters, .returns = returns };
+        try this.lambda_types.append(this.allocator, lambda_def);
+
+        return Type{ .Lambda = @intCast(u32, this.lambda_types.items.len - 1) };
     }
 };
 

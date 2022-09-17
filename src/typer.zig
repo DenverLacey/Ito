@@ -13,7 +13,9 @@ const todo = errors.todo;
 
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
-const Interpreter = @import("interpreter.zig").Interpreter;
+const interpreter = @import("interpreter.zig");
+const Interpreter = interpreter.Interpreter;
+const LambdaDefinition = interpreter.LambdaDefinition;
 
 const ast = @import("ast.zig");
 const Ast = ast.Ast;
@@ -30,6 +32,7 @@ const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
 const AstDef = ast.AstDef;
+const AstInstantiateLambda = ast.AstInstantiateLambda;
 const AstParam = ast.AstParam;
 const AstVarBlock = ast.AstVarBlock;
 const AstVar = ast.AstVar;
@@ -48,8 +51,15 @@ const LambdaTypeDefinition = values.LambdaTypeDefinition;
 
 const Binding = union(enum) {
     Var: VarBinding,
+    Lambda: VarBinding,
     Type: Type,
     Tag: Type,
+
+    const This = @This();
+
+    fn goesOnStack(this: This) bool {
+        return this == .Var or this == .Lambda;
+    }
 };
 
 const VarBinding = struct {
@@ -86,7 +96,7 @@ const Scope = struct {
             return raise(error.TypeError, err_msg, ident.token.location, "Redeclared identifier `{s}`.", .{ident.ident});
         }
 
-        if (binding == .Var) {
+        if (binding.goesOnStack()) {
             this.num_vars += 1;
         }
 
@@ -108,6 +118,11 @@ const Scope = struct {
     }
 };
 
+const CurrentFunction = struct {
+    infer_return_type: bool = false,
+    return_types: ArrayListUnmanaged(Type) = .{},
+};
+
 pub const Typer = struct {
     allocator: Allocator,
     interp: *Interpreter,
@@ -115,6 +130,8 @@ pub const Typer = struct {
 
     global_scope: *Scope,
     scopes: BucketArrayUnmanaged(8, Scope),
+
+    current_function: ?CurrentFunction,
 
     err_msg: ErrMsg,
 
@@ -131,6 +148,7 @@ pub const Typer = struct {
             .nodes = ArrayListUnmanaged(*Ast){},
             .global_scope = global_scope,
             .scopes = scopes,
+            .current_function = null,
             .err_msg = ErrMsg{},
         };
     }
@@ -337,8 +355,9 @@ pub const Typer = struct {
                 t_node = (try this.typecheckDef(def)).asAst();
             },
             .Param => {
-                const param = node.downcast(AstParam);
-                t_node = (try this.typecheckParam(param)).asAst();
+                unreachable;
+                // const param = node.downcast(AstParam);
+                // t_node = (try this.typecheckParam(param)).asAst();
             },
             .Var => {
                 const _var = node.downcast(AstVar);
@@ -381,6 +400,9 @@ pub const Typer = struct {
             .GetTag => {
                 return raise(error.InternalError, &this.err_msg, node.token.location, "Attempt to typecheck GetTag node made.", .{});
             },
+            .InstantiateLambda => {
+                return raise(error.InternalError, &this.err_msg, node.token.location, "Attempt to typecheck InstantiateLambda node made.", .{});
+            },
         }
 
         return t_node;
@@ -404,7 +426,7 @@ pub const Typer = struct {
 
         if (this.currentScope().findBinding(ident.ident)) |binding| {
             switch (binding.*) {
-                .Var => |var_binding| {
+                .Var, .Lambda => |var_binding| {
                     var get = try this.allocator.create(AstGetVar);
                     get.* = AstGetVar.init(ident.token, var_binding.typ, var_binding.index, var_binding.global);
                     t_node = get.asAst();
@@ -597,7 +619,7 @@ pub const Typer = struct {
                 ret_type = .Int;
             }
         } else {
-            return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an Int or Num value.", .{}); // @TODO: Error
+            return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an Int or Num value.", .{});
         }
 
         return ret_type;
@@ -684,12 +706,23 @@ pub const Typer = struct {
                 const tuple_type = this.interp.tuple_types.items[tuple_index];
                 
                 std.debug.assert(rhs.kind == .Comma);
-                try this.typecheckCallArguments(tuple_type.fields, rhs.downcast(AstBlock));
+                const args = rhs.downcast(AstBlock);
+
+                try this.typecheckCallArguments(tuple_type.fields, args);
                 
                 call.typ = Type{ .Tuple = tuple_index };
             } ,
             .Tag => |_| todo("Implement typecheck for calling tag types."),
-            .Lambda => |_| todo("Implement typecheck for calling lambda types."),
+            .Lambda => |lambda_index| {
+                const lambda_type = this.interp.lambda_types.items[lambda_index];
+
+                std.debug.assert(rhs.kind == .Comma);
+                const args = rhs.downcast(AstBlock);
+
+                try this.typecheckCallArguments(lambda_type.parameters, args);
+
+                call.typ = lambda_type.returns;
+            },
             else => return raise(error.TypeError, &this.err_msg, lhs.token.location, "A {} value is not callable.", .{lhs.typ.?}),
         }
     }
@@ -773,8 +806,6 @@ pub const Typer = struct {
         return _if;
     }
 
-    
-
     fn typecheckWhile(this: *This, _while: *AstWhile) !*AstWhile {
         const t_cond = (try this.typecheckNode(_while.condition)).?;
         if (t_cond.typ.? != .Bool) {
@@ -796,16 +827,97 @@ pub const Typer = struct {
         todo("Implement typecheckFor().");
     }
 
-    fn typecheckDef(this: *This, def: *AstDef) !*AstDef {
-        _ = this;
-        _ = def;
-        todo("Implement typecheckDef().");
-    }
+    fn typecheckDef(this: *This, def: *AstDef) !*AstInstantiateLambda {
+        const old_function = this.current_function;
+        defer this.current_function = old_function;
 
-    fn typecheckParam(this: *This, param: *AstParam) !*AstParam {
-        _ = this;
-        _ = param;
-        todo("Implement typecheckParam().");
+        std.debug.assert(def.ret_type != null); // @TODO: Implement inferring return type
+
+        this.current_function = CurrentFunction{ .infer_return_type = def.ret_type == null };
+
+        if (def.ret_type) |ret_type_sig| {
+            const ret_type = try this.typecheckTypeSignature(ret_type_sig);
+            try this.current_function.?.return_types.append(this.allocator, ret_type);
+        }
+
+        var params = try this.allocator.alloc(LambdaTypeDefinition.Parameter, def.params.len);
+        for (def.params) |param, i| {
+            const param_type: Type = if (param.sig) |s|
+                try this.typecheckTypeSignature(s)
+            else
+                Type.Any;
+            
+            params[i] = .{ .name = param.ident.ident, .typ = param_type };
+        }
+
+        // @NOTE:
+        // If we go down the inferring return types
+        // route then this is gonna be tricky to do.
+        //
+        const def_type = try this.interp.findOrAddLambdaType(params, this.current_function.?.return_types.items[0]);
+
+        const type_def = switch (def_type) {
+            .Lambda => |lambda_index|
+                this.interp.lambda_types.items[lambda_index],
+            else => unreachable,
+        };
+
+        const lambda_def = LambdaDefinition{
+            .name = def.ident.ident,
+            .type_def = type_def,
+            .code = def.body, // @NOTE: We assume that typechecking the body will not return a new AstBlock.
+            .closed_values = &.{}, // @TODO: CLOSE THE VALUES!!!
+            .closed_value_names = &.{}, // @TODO: See above
+        };
+
+        const lambda_index = try this.interp.addLambda(lambda_def);
+
+        const def_binding = Binding{ .Lambda = VarBinding{ .typ = def_type, .index = this.currentScope().num_vars, .global = this.currentScope() == this.global_scope } };
+        _ = try this.currentScope().addBinding(this.allocator, def.ident, def_binding, &this.err_msg);
+
+        // @NOTE:
+        // This isn't the full story. We want to be able to refer to things in
+        // the scopes above us and not just global scope but I think it'll
+        // require specific machinery to achieve and so just beginning a new
+        // scope isn't good enough.
+        //
+        try this.beginScope();
+        defer this.endScope();
+
+        const function_scope = this.currentScope();
+
+        //
+        // Typecheck Parameters
+        //
+        for (def.params) |param| {
+            const param_type: Type = if (param.sig) |sig|
+                try this.typecheckTypeSignature(sig)
+            else
+                Type.Any;
+            
+            _ = try function_scope.addBinding(
+                this.allocator,
+                param.ident,
+                Binding{ .Var = VarBinding{
+                    .typ = param_type,
+                    .index = function_scope.num_vars,
+                    .global = false,
+                }},
+                &this.err_msg,
+            );
+        }
+
+        // @TODO:
+        // - Discover closed values
+        // - Stuff them into the lambda definition through the interpreter.
+        //
+        const function_body = try this.typecheckBlock(def.body);     
+        std.debug.assert(function_body == def.body); // @NOTE: See above about `lambda_def`
+
+        var lambda_node = try this.allocator.create(AstInstantiateLambda);
+        lambda_node.* = AstInstantiateLambda.init(def.token, lambda_index);
+
+        return lambda_node;
     }
 
     fn typecheckVar(this: *This, _var: *AstVar) !*AstVar {
@@ -822,7 +934,7 @@ pub const Typer = struct {
         }
 
         const current_scope = this.currentScope();
-        const binding = Binding{ .Var = .{ .typ = var_type, .index = current_scope.num_vars, .global = true } }; // @TODO: Actually determine if global or not by comparing to current functions scope
+        const binding = Binding{ .Var = .{ .typ = var_type, .index = current_scope.num_vars, .global = this.current_function == null } };
         _ = try current_scope.addBinding(this.allocator, _var.ident, binding, &this.err_msg);
 
         _var.initializer = t_init;

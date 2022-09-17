@@ -1,3 +1,8 @@
+// @TODO:
+// - Check out Ada for language design inspiration
+// - Add ranged integer types like this:
+//      `type Byte = 0..256`
+
 const std = @import("std");
 const interpreter = @import("interpreter.zig");
 
