@@ -872,7 +872,13 @@ pub const Typer = struct {
 
         const lambda_index = try this.interp.addLambda(lambda_def);
 
-        const def_binding = Binding{ .Lambda = VarBinding{ .typ = def_type, .index = this.currentScope().num_vars, .global = this.currentScope() == this.global_scope } };
+        // @NOTE:
+        // We are extracting this out so we can change it later for reasons
+        // outlined in the :RecursionDuplicate.
+        //
+        var lambda_binding = VarBinding{ .typ = def_type, .index = this.currentScope().num_vars, .global = this.currentScope() == this.global_scope };
+
+        const def_binding = Binding{ .Lambda = lambda_binding };
         _ = try this.currentScope().addBinding(this.allocator, def.ident, def_binding, &this.err_msg);
 
         // @NOTE:
@@ -885,6 +891,26 @@ pub const Typer = struct {
         defer this.endScope();
 
         const function_scope = this.currentScope();
+
+        // @HACK:
+        // This is a hacky workaround. Usually scopes are still apart of the
+        // same function and so `num_vars` needs to continue on from the parent
+        // but in this case, since we are starting a new function, we need to
+        // start at 0.
+        //
+        // This is a consequence of the above note and should be fixed alongside
+        // that.
+        //
+        function_scope.num_vars = 0;
+
+        // @NOTE:RecursionDuplicate
+        // We're adding the binding again because the evaluator will put a copy
+        // of the closure on the stack because otherwise it won't be able to
+        // recurse.
+        lambda_binding.index = 0;
+        lambda_binding.global = false;
+        const recursive_binding = Binding{ .Lambda = lambda_binding };
+        _ = try function_scope.addBinding(this.allocator, def.ident, recursive_binding, &this.err_msg);
 
         //
         // Typecheck Parameters

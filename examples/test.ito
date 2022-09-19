@@ -4,9 +4,16 @@
 def add(a: Num, b: Num): Num =
   a + b
 add
+  
+def sub(a: Num, b: Num): Num =
+  a - b
+sub
 
 var sum = add 3.0, 4.0
 sum
+
+var difference = sub 9.0, 3.0
+difference
 
 
 type 
