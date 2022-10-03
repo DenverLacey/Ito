@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
+const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const CodeLocation = @import("parser.zig").CodeLocation;
 
@@ -174,35 +175,38 @@ pub const Typer = struct {
         try this.nodes.append(this.allocator, node);
     }
 
-    fn unionizeTypes(this: *This, types: []Type) !Type {
-        std.debug.assert(types.len > 0);
-
-        var flattened = ArrayListUnmanaged(Type){};
-        defer flattened.deinit(this.allocator);
-        {
-            for (types) |typ| {
-                switch (typ) {
-                    .Union => |union_index| {
-                        const union_type = this.interp.union_types.items[union_index];
-                        for (union_type.variants) |variant| {
-                            try flattened.append(this.allocator, variant);
-                        }
-                    },
-                    else => try flattened.append(this.allocator, typ),
-                }
+    fn flattenUnionTypes(this: *This, flattened: *AutoArrayHashMapUnmanaged(Type, void), types: []const Type) anyerror!void {
+        for (types) |typ| {
+            switch (typ) {
+                .Union => |union_index| {
+                    const union_type = this.interp.union_types.items[union_index];
+                    try this.flattenUnionTypes(flattened, union_type.variants);
+                },
+                else => try flattened.put(this.allocator, typ, {}),
             }
         }
+    }
+
+    fn unionizeTypes(this: *This, types: []const Type) !Type {
+        std.debug.assert(types.len > 0);
+
+        var flattened = AutoArrayHashMapUnmanaged(Type, void){};
+        defer flattened.deinit(this.allocator);
         
-        if (flattened.items.len == 1) {
-            return flattened.items[0];
+        try this.flattenUnionTypes(&flattened, types);
+
+        const flattened_types = flattened.keys();
+        
+        if (flattened_types.len == 1) {
+            return flattened_types[0];
         }
 
         // check for equality and Any
         {
             var i: usize = 0;
-            while (i < flattened.items.len - 1) : (i += 1) {
-                const ta = flattened.items[i];
-                const tb = flattened.items[i + 1];
+            while (i < flattened_types.len - 1) : (i += 1) {
+                const ta = flattened_types[i];
+                const tb = flattened_types[i + 1];
 
                 if (ta == .Any or tb == .Any) {
                     return .Any;
@@ -212,18 +216,18 @@ pub const Typer = struct {
                     break;
                 }
             } else {
-                return flattened.items[0];
+                return flattened_types[0];
             }
         }
 
         var found_index: ?usize = null;
         for (this.interp.union_types.items) |union_type, union_index| {
-            if (union_type.variants.len != flattened.items.len)
+            if (union_type.variants.len != flattened_types.len)
                 continue;
             
             for (union_type.variants) |union_variant| {
                 var found = false;
-                for (flattened.items) |types_variant| {
+                for (flattened_types) |types_variant| {
                     if (types_variant.eql(union_variant)) {
                         found = true;
                         break;
@@ -243,8 +247,8 @@ pub const Typer = struct {
             return Type{ .Union = @intCast(u32, union_index) };
         }
 
-        const variants = try this.allocator.alloc(Type, flattened.items.len);
-        for (flattened.items) |typ, i| {
+        const variants = try this.allocator.alloc(Type, flattened_types.len);
+        for (flattened_types) |typ, i| {
             variants[i] = typ;
         }
 
@@ -611,12 +615,14 @@ pub const Typer = struct {
         type_a: Type,
         type_b: Type
     ) !Type {
+        const int_or_num_type = try this.unionizeTypes(&[_]Type{ .Int, .Num });
+
         var ret_type: Type = undefined;
-        if ((type_a == .Int or type_a == .Num) and (type_b == .Int or type_b == .Num)) {
+        if (type_a.compat(int_or_num_type) and type_b.compat(int_or_num_type)) {
             if (type_a == .Num or type_b == .Num) {
                 ret_type = .Num;
             } else {
-                ret_type = .Int;
+                ret_type = try this.unionizeTypes(&[_]Type{ type_a, type_b });
             }
         } else {
             return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an Int or Num value.", .{});
@@ -831,13 +837,13 @@ pub const Typer = struct {
         const old_function = this.current_function;
         defer this.current_function = old_function;
 
-        std.debug.assert(def.ret_type != null); // @TODO: Implement inferring return type
-
         this.current_function = CurrentFunction{ .infer_return_type = def.ret_type == null };
 
         if (def.ret_type) |ret_type_sig| {
             const ret_type = try this.typecheckTypeSignature(ret_type_sig);
             try this.current_function.?.return_types.append(this.allocator, ret_type);
+        } else {
+            try this.current_function.?.return_types.append(this.allocator, .Any);
         }
 
         var params = try this.allocator.alloc(LambdaTypeDefinition.Parameter, def.params.len);
@@ -939,6 +945,24 @@ pub const Typer = struct {
         //
         const function_body = try this.typecheckBlock(def.body);     
         std.debug.assert(function_body == def.body); // @NOTE: See above about `lambda_def`
+
+        // @TODO:
+        // This will need to check that it's compatible with at least one of
+        // the return types.
+        //
+        const return_type = this.current_function.?.return_types.items[0];
+        if (function_body.typ) |body_type| {
+            if (!body_type.compat(return_type)) {
+                // @TODO: Get location of the expression that is the wrong type
+                // instead of just using the block.
+                //
+                return raise(error.TypeError, &this.err_msg, function_body.token.location, "Return type specified to be `{}` but the lambda body returns a {} value.", .{return_type, function_body.typ.?});
+            }
+        } else {
+            if (return_type != .Any and return_type != .None) {
+                return raise(error.TypeError, &this.err_msg, function_body.token.location, "Return type specified to be `{}` but the lambda body returns a None value.", .{return_type});
+            }
+        }
 
         var lambda_node = try this.allocator.create(AstInstantiateLambda);
         lambda_node.* = AstInstantiateLambda.init(def.token, lambda_index);

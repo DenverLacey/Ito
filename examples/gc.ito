@@ -1,0 +1,14 @@
+var never_deallocated_str = "String #1"
+
+do
+  var is_deallocated_str = "String #2"
+
+type Person = (name: Str, age: Int)
+
+do
+  var is_deallocated_person = Person "String #3", 101
+
+def never_deallocated_closure(s: Str) -> None =
+  var is_deallocated_person = Person s, 69420
+
+never_deallocated_closure "String #4"

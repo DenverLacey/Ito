@@ -1,11 +1,11 @@
 # module Main
 
 
-def add(a: Num, b: Num): Num =
+def add(a: Num, b: Num) -> Num =
   a + b
 add
   
-def sub(a: Num, b: Num): Num =
+def sub(a: Num, b: Num) -> Num =
   a - b
 sub
 
@@ -126,3 +126,15 @@ string
 # This is a thing but is commented out because it crashes the program
 # string = matrix?
 # string
+
+def foo(x: Int|Num) =
+  x * x
+
+var x: Int|Num = 2
+var y: Int|Num = 4.6
+x + y
+
+def bar(x: Num) -> Num =
+  x * x + x
+
+bar 4

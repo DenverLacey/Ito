@@ -113,6 +113,7 @@ pub const Type = union(enum) {
             },
             .Int => switch (with) {
                 .Any, .Int => return true,
+                .Num => return true,
                 .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },

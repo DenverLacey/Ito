@@ -107,6 +107,7 @@ pub const Token = struct {
             .Space => .Call,
             .QuestionMark => .Unary,
             .DoubleQuestionMark => .NoneOr,
+            .Arrow => .None, // @TODO: When we do annonymous lambdas maybe we want a particular precedence.
 
             // Keywords
             .Do => .None,
@@ -170,6 +171,7 @@ pub const Token = struct {
                 .Space => try writer.print(" ", .{}),
                 .QuestionMark => try writer.print("?", .{}),
                 .DoubleQuestionMark => try writer.print("??", .{}),
+                .Arrow => try writer.print("->", .{}),
 
                 // Keywords
                 .Do => try writer.print("do", .{}),
@@ -233,6 +235,7 @@ pub const TokenKind = enum {
     Space,
     QuestionMark,
     DoubleQuestionMark,
+    Arrow,
 
     // Keywords
     Do,
@@ -291,6 +294,7 @@ pub const TokenData = union(TokenKind) {
     Space,
     QuestionMark,
     DoubleQuestionMark,
+    Arrow,
 
     // Keywords
     Do,
@@ -352,6 +356,7 @@ pub const TokenData = union(TokenKind) {
             .Space => _ = try writer.write(".Space"),
             .QuestionMark => _ = try writer.write(".QuestionMark"),
             .DoubleQuestionMark => _ = try writer.write(".DoubleQuestionMark"),
+            .Arrow => _ = try writer.write(".Arrow"),
 
             // Keywords
             .Do => _ = try writer.write(".Do"),
@@ -454,34 +459,98 @@ pub const Tokenizer = struct {
         return c == '\'';
     }
 
+    fn isNumBegin(this: *This) bool {
+        const reset_point = this.source.i;
+        defer this.source.i = reset_point;
+
+        const c1 = this.peekChar() orelse return false;
+        if (zg.isAsciiDigit(c1))
+            return true;
+
+        if (!this.nextIfEq('-'))
+            return false;
+        
+        const c2 = this.peekChar() orelse return false;
+        return zg.isAsciiDigit(c2);
+    }
+
+    fn callIsBlocked(this: *This) bool {
+        return this.previousIsCallBlocking() or this.nextIsCallBlocking();
+    }
+
     fn nextIsCallBlocking(this: *This) bool {
         const reset_point = this.source.i;
         defer this.source.i = reset_point;
 
-        const c = this.peekChar() orelse return false;
-        switch (c) {
-            ',' => return true,
-            ';' => return true,
-            ':' => return true,
-            ')' => return true,
-            '}' => return true,
-            ']' => return true,
-            '!' => return true,
-            '+' => return true,
-            '-' => return true,
-            '*' => return true,
-            '/' => return true,
-            '=' => return true,
-            '<' => return true,
-            '>' => return true,
-            '.' => return true,
-            '?' => return true,
-            else => return isIdentBegin(c) and this.tokenizeIdentOrKeyword().data != .Ident,
+        const num_peeked = this.peeked_tokens.items.len;
+        defer this.peeked_tokens.shrinkRetainingCapacity(num_peeked);
+
+        const token = (this.peek(0) catch return false) orelse return false;
+        switch (token.data) {
+            // Delimeters
+            .Newline,
+            .Comma,
+            .Semicolon,
+            .Colon,
+            .RightParen,
+            .RightCurly,
+            .RightSquare,
+            .Pipe,
+
+            // Operators
+            .Bang,
+            .BangEqual,
+            .Or,
+            .And,
+            .Plus,
+            .Dash,
+            .Star,
+            .Slash,
+            .Equal,
+            .DoubleEqual,
+            .RightAngle,
+            .Dot,
+            .DoubleDot,
+            .Space,
+            .QuestionMark,
+            .DoubleQuestionMark,
+            .Arrow,
+
+            // Keywords
+            .In => return true,
+
+            else => return false,
         }
+
+        // const c = this.peekChar() orelse return false;
+        // switch (c) {
+        //     ',' => return true,
+        //     ';' => return true,
+        //     ':' => return true,
+        //     ')' => return true,
+        //     '}' => return true,
+        //     ']' => return true,
+        //     '!' => return true,
+        //     '+' => return true,
+        //     '-' => return true,
+        //     '*' => return true,
+        //     '/' => return true,
+        //     '=' => return true,
+        //     '<' => return true,
+        //     '>' => return true,
+        //     '.' => return true,
+        //     '?' => return true,
+        //     else => return isIdentBegin(c) and this.tokenizeIdentOrKeyword().data != .Ident,
+        // }
     }
 
     fn previousIsCallBlocking(this: *This) bool {
-        return switch (this.previous_token_kind) {
+        var previous = this.previous_token_kind;
+        if (this.peeked_tokens.items.len != 0) {
+            previous = this.peeked_tokens.items[this.peeked_tokens.items.len - 1].data;
+        }
+
+        return switch (previous) {
             // Literals
             .None,
             .Bool,
@@ -497,7 +566,8 @@ pub const Tokenizer = struct {
             .Colon,
             .LeftParen,
             .LeftCurly,
-            .LeftSquare => true,
+            .LeftSquare,
+            .Arrow => true,
 
             // Operators
             .Bang,
@@ -593,9 +663,14 @@ pub const Tokenizer = struct {
 
     fn next(this: *This) !?Token {
         if (this.peeked_tokens.items.len != 0) {
-            return this.peeked_tokens.orderedRemove(0);
+            const t = this.peeked_tokens.orderedRemove(0);
+            std.debug.print(">>> {}\n", .{t});
+            return t;
         }
-        return try this.nextNoPeeking();
+
+        const t = try this.nextNoPeeking();
+        std.debug.print(">>> {}\n", .{t});
+        return t;
     }
 
     fn nextNoPeeking(this: *This) !?Token {
@@ -608,7 +683,7 @@ pub const Tokenizer = struct {
             } else if (c == '\n') {
                 token = Token.init(this.indentation, .Newline, this.currentLocation());
                 _ = this.nextChar();
-            } else if (zg.isAsciiDigit(c)) {
+            } else if (this.isNumBegin()) {
                 token = this.tokenizeNumber();
             } else if (isCharBegin(c)) {
                 token = try this.tokenizeTextLiteral(true);
@@ -667,7 +742,7 @@ pub const Tokenizer = struct {
                         if (track_indentation) {
                             this.indentation += 1;
                         } else if (this.peekChar() != null) {
-                            if (!(this.previousIsCallBlocking() or this.nextIsCallBlocking())) {
+                            if (!this.callIsBlocked()) {
                                 this.source.i = reset_point;
                                 break;
                             }
@@ -683,6 +758,10 @@ pub const Tokenizer = struct {
 
         const start_index = this.source.i;
         var end_index = start_index;
+
+        if (this.nextIfEq('-'))
+            end_index = this.source.i;
+
         while (this.nextIf(zg.isAsciiDigit) != null) {
             end_index = this.source.i;
         }
@@ -813,7 +892,10 @@ pub const Tokenizer = struct {
             else
                 Token.init(this.indentation, .Bang, location),
             '+' => Token.init(this.indentation, .Plus, location),
-            '-' => Token.init(this.indentation, .Dash, location),
+            '-' => if (this.nextIfEq('>'))
+                Token.init(this.indentation, .Arrow, location)
+            else
+                Token.init(this.indentation, .Dash, location),
             '*' => Token.init(this.indentation, .Star, location),
             '/' => Token.init(this.indentation, .Slash, location),
             '=' => if (this.nextIfEq('='))
@@ -1358,11 +1440,16 @@ pub const Parser = struct {
         try this.skipNewlines();
         const ident = (try this.parseIdent()) orelse return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `def` keyword.", .{});
 
-        _ = try this.skipExpect(.LeftParen, "Expected `(` to begin parameter list.");
+        // _ = try this.skipExpect(.LeftParen, "Expected `(` to begin parameter list.");
+        const parens = (try this.skipMatch(.LeftParen)) != null;
+
+        if (!parens) {
+            _ = try this.expect(.Space, "Expected either `(` or a space to begin parameter list.");
+        }
 
         var params = ArrayListUnmanaged(*AstParam){};
         while (true) {
-            if ((try this.check(.RightParen)) or (try this.checkEof())) {
+            if ((try this.check(.RightParen)) or (try this.check(.Equal)) or (try this.checkEof())) {
                 break;
             }
 
@@ -1390,10 +1477,12 @@ pub const Parser = struct {
             }
         }
 
-        _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
+        if (parens) {
+            _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
+        }
 
         var ret_type: ?*AstTypeSignature = null;
-        if ((try this.match(.Colon)) != null) {
+        if ((try this.match(.Arrow)) != null) {
             ret_type = try this.parseTypeSignature(true);
         }
 
@@ -1520,6 +1609,9 @@ pub const Parser = struct {
             var ident = switch (big_ident.data) { .BigIdent => |id| id, else => unreachable };
             sig = try this.allocator.create(AstTypeSignature);
             sig.* = AstTypeSignature.init(big_ident, AstTypeSignature.Data{ .Name = ident });
+        } else if (try this.match(.None)) |none| {
+            sig = try this.allocator.create(AstTypeSignature);
+            sig.* = AstTypeSignature.init(none, AstTypeSignature.Data{ .Name = "None" });
         } else if (try this.match(.LeftParen)) |paren| {
             sig = try this.parseTupleTypeSignature(paren);
         } else if (try this.match(.LeftSquare)) |square| {
