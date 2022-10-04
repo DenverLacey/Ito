@@ -83,7 +83,7 @@ pub const Token = struct {
             .Colon => .None,
             .LeftParen => .Call,
             .RightParen => .None,
-            .LeftCurly => .None,
+            .LeftCurly => .Call,
             .RightCurly => .None,
             .LeftSquare => .Call,
             .RightSquare => .None,
@@ -104,7 +104,6 @@ pub const Token = struct {
             .RightAngle => .Comparison,
             .Dot => .Call,
             .DoubleDot => .Range,
-            .Space => .Call,
             .QuestionMark => .Unary,
             .DoubleQuestionMark => .NoneOr,
             .Arrow => .None, // @TODO: When we do annonymous lambdas maybe we want a particular precedence.
@@ -168,7 +167,6 @@ pub const Token = struct {
                 .RightAngle => try writer.print(">", .{}),
                 .Dot => try writer.print(".", .{}),
                 .DoubleDot => try writer.print("..", .{}),
-                .Space => try writer.print(" ", .{}),
                 .QuestionMark => try writer.print("?", .{}),
                 .DoubleQuestionMark => try writer.print("??", .{}),
                 .Arrow => try writer.print("->", .{}),
@@ -232,7 +230,6 @@ pub const TokenKind = enum {
     RightAngle,
     Dot,
     DoubleDot,
-    Space,
     QuestionMark,
     DoubleQuestionMark,
     Arrow,
@@ -291,7 +288,6 @@ pub const TokenData = union(TokenKind) {
     RightAngle,
     Dot,
     DoubleDot,
-    Space,
     QuestionMark,
     DoubleQuestionMark,
     Arrow,
@@ -353,7 +349,6 @@ pub const TokenData = union(TokenKind) {
             .RightAngle => _ = try writer.write(".RightAngle"),
             .Dot => _ = try writer.write(".Dot"),
             .DoubleDot => _ = try writer.write(".DoubleDot"),
-            .Space => _ = try writer.write(".Space"),
             .QuestionMark => _ = try writer.write(".QuestionMark"),
             .DoubleQuestionMark => _ = try writer.write(".DoubleQuestionMark"),
             .Arrow => _ = try writer.write(".Arrow"),
@@ -476,133 +471,6 @@ pub const Tokenizer = struct {
 
     fn callIsBlocked(this: *This) bool {
         return this.previousIsCallBlocking() or this.nextIsCallBlocking();
-    }
-
-    fn nextIsCallBlocking(this: *This) bool {
-        const reset_point = this.source.i;
-        defer this.source.i = reset_point;
-
-        const num_peeked = this.peeked_tokens.items.len;
-        defer this.peeked_tokens.shrinkRetainingCapacity(num_peeked);
-
-        const token = (this.peek(0) catch return false) orelse return false;
-        switch (token.data) {
-            // Delimeters
-            .Newline,
-            .Comma,
-            .Semicolon,
-            .Colon,
-            .RightParen,
-            .RightCurly,
-            .RightSquare,
-            .Pipe,
-
-            // Operators
-            .Bang,
-            .BangEqual,
-            .Or,
-            .And,
-            .Plus,
-            .Dash,
-            .Star,
-            .Slash,
-            .Equal,
-            .DoubleEqual,
-            .RightAngle,
-            .Dot,
-            .DoubleDot,
-            .Space,
-            .QuestionMark,
-            .DoubleQuestionMark,
-            .Arrow,
-
-            // Keywords
-            .In => return true,
-
-            else => return false,
-        }
-
-        // const c = this.peekChar() orelse return false;
-        // switch (c) {
-        //     ',' => return true,
-        //     ';' => return true,
-        //     ':' => return true,
-        //     ')' => return true,
-        //     '}' => return true,
-        //     ']' => return true,
-        //     '!' => return true,
-        //     '+' => return true,
-        //     '-' => return true,
-        //     '*' => return true,
-        //     '/' => return true,
-        //     '=' => return true,
-        //     '<' => return true,
-        //     '>' => return true,
-        //     '.' => return true,
-        //     '?' => return true,
-        //     else => return isIdentBegin(c) and this.tokenizeIdentOrKeyword().data != .Ident,
-        // }
-    }
-
-    fn previousIsCallBlocking(this: *This) bool {
-        var previous = this.previous_token_kind;
-        if (this.peeked_tokens.items.len != 0) {
-            previous = this.peeked_tokens.items[this.peeked_tokens.items.len - 1].data;
-        }
-
-        return switch (previous) {
-            // Literals
-            .None,
-            .Bool,
-            .Char,
-            .Int,
-            .Num,
-            .Str => true,
-
-            // Delimeters
-            .Newline,
-            .Comma,
-            .Semicolon,
-            .Colon,
-            .LeftParen,
-            .LeftCurly,
-            .LeftSquare,
-            .Arrow => true,
-
-            // Operators
-            .Bang,
-            .BangEqual,
-            .Or,
-            .And,
-            .Plus,
-            .Dash,
-            .Star,
-            .Slash,
-            .Equal,
-            .DoubleEqual,
-            .LeftAngle,
-            .RightAngle,
-            .Dot,
-            .DoubleDot,
-            .Space,
-            .DoubleQuestionMark => true,
-
-            // Keywords
-            .Do,
-            .Pass,
-            .If,
-            .Else,
-            .Elif,
-            .While,
-            .For,
-            .In,
-            .Def,
-            .Var,
-            .Type,
-            .Module => true,
-
-            else => false,
-        };
     }
 
     fn peekChar(this: *This) ?Char {
@@ -737,15 +605,9 @@ pub const Tokenizer = struct {
                             }
                         }
 
-                        const reset_point = this.source.i;
                         _ = this.nextChar();
                         if (track_indentation) {
                             this.indentation += 1;
-                        } else if (this.peekChar() != null) {
-                            if (!this.callIsBlocked()) {
-                                this.source.i = reset_point;
-                                break;
-                            }
                         }
                     }
                 }
@@ -908,7 +770,6 @@ pub const Tokenizer = struct {
                 Token.init(this.indentation, .DoubleDot, location)
             else
                 Token.init(this.indentation, .Dot, location),
-            ' ' => Token.init(this.indentation, .Space, location),
             '?' => if (this.nextIfEq('?'))
                 Token.init(this.indentation, .DoubleQuestionMark, location)
             else
@@ -922,7 +783,6 @@ pub const Parser = struct {
     allocator: Allocator,
     tokenizer: Tokenizer,
     err_msg: ErrMsg,
-    parsing_comma_separated_expressions: bool,
 
     const This = @This();
 
@@ -1153,20 +1013,15 @@ pub const Parser = struct {
 
             // Delimeters
             .LeftParen => {
-                const old_pcse = this.parsing_comma_separated_expressions;
-                this.parsing_comma_separated_expressions = false;
-                defer this.parsing_comma_separated_expressions = old_pcse;
-
                 const expr = try this.parseExpression();
                 _ = try this.expect(.RightParen, "Expected `)` to terminate parenthesized expression.");
                 return expr;
             },
             .LeftSquare => {
-                const old_pcse = this.parsing_comma_separated_expressions;
-                this.parsing_comma_separated_expressions = false;
-                defer this.parsing_comma_separated_expressions = old_pcse;
-
                 return (try this.parseList(token)).asAst();
+            },
+            .LeftCurly => {
+                todo("Implment anonymous tuple literals");
             },
 
             // Operators
@@ -1255,14 +1110,6 @@ pub const Parser = struct {
                 return (try this.parseBinary(prec, .NoneOr, token, previous)).asAst();
             },
 
-            .Space => {
-                const terminator = if (this.parsing_comma_separated_expressions) TokenKind.Comma else TokenKind.Newline;
-                const args = try this.parseCommaSeparatedExpressions(terminator, token);
-                _ = try this.match(.Space);
-
-                const call = try this.createNode(AstBinary, .{ .Call, token, previous, args.asAst() });
-                return call.asAst();
-            },
             .LeftParen => {
                 const args = try this.parseCommaSeparatedExpressions(.RightParen, token);
                 _ = try this.expect(.RightParen, "Expected `)` to terminate call operator.");
@@ -1271,13 +1118,19 @@ pub const Parser = struct {
                 return call.asAst();
             },
             .LeftSquare => {
-                const old_pcse = this.parsing_comma_separated_expressions;
-                this.parsing_comma_separated_expressions = false;
-                defer this.parsing_comma_separated_expressions = old_pcse;
-
                 const expr = (try this.parseBinary(.Assignment, .Index, token, previous)).asAst();
                 _ = try this.expect(.RightSquare, "Expected `]` to terminate index operator.");
                 return expr;
+            },
+            .LeftCurly => {
+                const args = try this.parseCommaSeparatedExpressions(.RightCurly, token);
+                _ = try this.expect(.RightCurly, "Expected `}}` to terminate call operator.");
+
+                // @TODO:
+                // Actually differentiate between calls with ()'s and typed tuple literals with {}'s
+                //
+                const call = try this.createNode(AstBinary, .{ .Call, token, previous, args.asAst() });
+                return call.asAst();
             },
 
             else => {
@@ -1336,10 +1189,6 @@ pub const Parser = struct {
 
     fn parseCommaSeparatedExpressions(this: *This, terminator: TokenKind, token: Token) !*AstBlock {
         var nodes = ArrayListUnmanaged(*Ast){};
-
-        const old_pcse = this.parsing_comma_separated_expressions;
-        this.parsing_comma_separated_expressions = true;
-        defer this.parsing_comma_separated_expressions = old_pcse;
 
         while (true) {
             if (terminator != .Newline) try this.skipNewlines();
@@ -1440,12 +1289,7 @@ pub const Parser = struct {
         try this.skipNewlines();
         const ident = (try this.parseIdent()) orelse return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Expected an identifier after `def` keyword.", .{});
 
-        // _ = try this.skipExpect(.LeftParen, "Expected `(` to begin parameter list.");
-        const parens = (try this.skipMatch(.LeftParen)) != null;
-
-        if (!parens) {
-            _ = try this.expect(.Space, "Expected either `(` or a space to begin parameter list.");
-        }
+        _ = try this.skipExpect(.LeftParen, "Expected `(` to begin parameter list.");
 
         var params = ArrayListUnmanaged(*AstParam){};
         while (true) {
@@ -1477,9 +1321,7 @@ pub const Parser = struct {
             }
         }
 
-        if (parens) {
-            _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
-        }
+        _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
 
         var ret_type: ?*AstTypeSignature = null;
         if ((try this.match(.Arrow)) != null) {
@@ -1612,7 +1454,7 @@ pub const Parser = struct {
         } else if (try this.match(.None)) |none| {
             sig = try this.allocator.create(AstTypeSignature);
             sig.* = AstTypeSignature.init(none, AstTypeSignature.Data{ .Name = "None" });
-        } else if (try this.match(.LeftParen)) |paren| {
+        } else if (try this.match(.LeftCurly)) |paren| {
             sig = try this.parseTupleTypeSignature(paren);
         } else if (try this.match(.LeftSquare)) |square| {
             sig = try this.parseTagTypeSignature(square);
@@ -1637,7 +1479,7 @@ pub const Parser = struct {
 
         while (true) {
             try this.skipNewlines();
-            if ((try this.check(.RightParen)) or (try this.checkEof())) {
+            if ((try this.check(.RightCurly)) or (try this.checkEof())) {
                 break;
             }
 
@@ -1661,7 +1503,7 @@ pub const Parser = struct {
             }
         }
 
-        _ = try this.expect(.RightParen, "Expected `)` to terminate tuple type signature.");
+        _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple type signature.");
 
         var node = try this.allocator.create(AstTypeSignature);
         node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Tuple = .{ .field_names = field_names.items, .field_types = field_types.items } });

@@ -9,23 +9,23 @@ def sub(a: Num, b: Num) -> Num =
   a - b
 sub
 
-var sum = add 3.0, 4.0
+var sum = add(3.0, 4.0)
 sum
 
-var difference = sub 9.0, 3.0
+var difference = sub(9.0, 3.0)
 difference
 
 
 type 
   Fullname =
-    ( firstname : Str
+    { firstname : Str
     , lastname : Str
-    )
+    }
   
   Person =
-    ( name : Fullname
+    { name : Fullname
     , age : Int
-    )
+    }
   
   Direction =
     [ Up
@@ -45,15 +45,15 @@ Namelike
 
 
 var
-  name = Fullname "Denver", "Lacey"
-  person = Person name, 23
+  name = Fullname{ "Denver", "Lacey" }
+  person = Person{ name, 23 }
 # direction = Up
 
 name
 person
-# println name
-# println person
-# println direciton
+# println(name)
+# println(person)
+# println(direciton)
 
 
 if name == person.name
@@ -99,7 +99,7 @@ while i < 5
 # for x in 0..5
 #   x
 
-var numbers = [1, 2, 3, 4, "five", (Fullname "Six", "Seven")]
+var numbers = [1, 2, 3, 4, "five", Fullname{ "Six", "Seven" }]
 numbers
 
 var a = True
@@ -130,11 +130,12 @@ string
 def foo(x: Int|Num) =
   x * x
 
-var x: Int|Num = 2
-var y: Int|Num = 4.6
-x + y
+do
+  var x: Int|Num = 2
+  var y: Int|Num = 4.6
+  x + y
 
 def bar(x: Num) -> Num =
   x * x + x
 
-bar 4
+bar(4)

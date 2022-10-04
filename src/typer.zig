@@ -756,7 +756,7 @@ pub const Typer = struct {
     fn typecheckDot(this: *This, dot: *AstBinary) !*AstBinary {
         const t_lhs = (try this.typecheckNode(dot.lhs)).?;
 
-        std.debug.print("rhs.kind = {}", .{dot.rhs.kind});
+        std.debug.print("rhs.kind = {}\n", .{dot.rhs.kind});
         std.debug.assert(dot.rhs.kind == .Ident);
         const ident = dot.rhs.downcast(AstIdent);
 

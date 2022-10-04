@@ -154,6 +154,7 @@ pub const Interpreter = struct {
         var found_index: ?usize = null;
         for (this.lambda_types.items) |lambda_type, lambda_index| {
             if (!lambda_type.returns.eql(returns)) continue;
+            if (lambda_type.parameters.len != parameters.len) continue;
 
             var not_eql = false;
             for (lambda_type.parameters) |param, i| {
@@ -190,7 +191,6 @@ pub fn interpret(allocator: Allocator, filename: []const u8) !void {
         .allocator = allocator,
         .tokenizer = undefined,
         .err_msg = ErrMsg{},
-        .parsing_comma_separated_expressions = false
     };
     p.tokenizer = try Tokenizer.init(allocator, &p.err_msg, filename, source);
     const nodes = p.parse() catch |err| {
