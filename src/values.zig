@@ -194,14 +194,14 @@ pub const Type = union(enum) {
             .Tuple => |index| {
                 const tuple_type = interp.tuple_types.items[index];
 
-                _ = try writer.write("(");
+                _ = try writer.write("{ ");
                 for (tuple_type.fields) |field, i| {
                     try writer.print("{s} : {}", .{field.name, field.typ});
                     if (i < tuple_type.fields.len - 1) {
                         _ = try writer.write(", ");
                     }
                 }
-                _ = try writer.write(")");
+                _ = try writer.write(" }");
             },
             .Tag => |index| {
                 const tag_type = interp.tag_types.items[index];
@@ -615,7 +615,7 @@ pub const Tuple = struct {
         _: std.fmt.FormatOptions,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
-        _ = try writer.write("(");
+        _ = try writer.write("{ ");
 
         var it = this.fields.iterator();
         var i: usize = 0;
@@ -626,7 +626,7 @@ pub const Tuple = struct {
             }
         }
 
-        _ = try writer.write(")");
+        _ = try writer.write(" }");
     }
 };
 

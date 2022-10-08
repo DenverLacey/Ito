@@ -18,7 +18,8 @@ pub fn main() anyerror!void {
     if (args.next(allocator)) |next| {
         filename = try next;
     } else {
-        std.debug.print("Error: No file given to compile.\n", .{});
+        var stdout = std.io.getStdOut().writer();
+        _ = try stdout.write("Error: No file given to compile.\n");
         return;
     }
     defer allocator.free(filename);

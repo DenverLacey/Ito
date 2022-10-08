@@ -80,7 +80,7 @@ pub const Token = struct {
             .Newline => .None,
             .Comma => .None,
             .Semicolon => .None,
-            .Colon => .None,
+            .Colon => .Colon,
             .LeftParen => .Call,
             .RightParen => .None,
             .LeftCurly => .Call,
@@ -1061,6 +1061,10 @@ pub const Parser = struct {
     fn parseInfix(this: *This, token: Token, previous: *Ast) anyerror!*Ast {
         const prec = token.precedence();
         switch (token.data) {
+            .Colon => {
+                return (try this.parseBinary(prec, .Bind, token, previous)).asAst();
+            },
+            
             .Plus => {
                 return (try this.parseBinary(prec, .Add, token, previous)).asAst();
             },

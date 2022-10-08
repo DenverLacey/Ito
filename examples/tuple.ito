@@ -1,0 +1,9 @@
+type
+  Pos =
+    { x : Num
+    , y : Num
+    }
+
+
+var pos = { x: 1.2, y: 3.4 }
+pos

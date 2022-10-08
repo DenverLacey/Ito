@@ -239,6 +239,10 @@ pub const Evaluator = struct {
                 return Value.None;
             },
 
+            .Bind => {
+                return raise(error.InternalError, &this.err_msg, node.token.location, "Bind node reached evaluation.", .{});
+            },
+
             // Blocks
             .Block, .Comma => {
                 const block = node.downcast(AstBlock);

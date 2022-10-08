@@ -53,7 +53,8 @@ pub const Ast = struct {
             .Call,
             .Dot,
             .ExclusiveRange,
-            .NoneOr => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+            .NoneOr,
+            .Bind => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
             .Block, .Comma, .List => try writer.print("{}", .{this.downcastConst(AstBlock)}),
@@ -111,6 +112,7 @@ pub const AstKind = enum {
     Dot,
     ExclusiveRange,
     NoneOr,
+    Bind,
 
     // Blocks
     Block,

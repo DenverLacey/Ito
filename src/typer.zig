@@ -391,6 +391,14 @@ pub const Typer = struct {
                 // t_node = (try this.typecheckTypeSignature(sig)).asAst();
             },
 
+            // Requires Greater Context
+            .Bind => {
+                const bind = node.downcast(AstBinary);
+                bind.rhs = (try this.typecheckNode(bind.rhs)).?;
+                bind.typ = bind.rhs.typ;
+                t_node = bind.asAst();
+            },
+
             // Typechecked specific
             .GetGlobal => {
                 return raise(error.InternalError, &this.err_msg, node.token.location, "Attempt to typecheck GetGlobal node made.", .{});
@@ -734,21 +742,75 @@ pub const Typer = struct {
     }
 
     fn typecheckCallArguments(this: *This, params: []NamedParam, args: *AstBlock) !void {
-        // @TODO:
-        // Implement keyword arguments.
-        //
         if (params.len != args.nodes.len) {
             // @TODO: Send first extra args location instead
             return raise(error.TypeError, &this.err_msg, args.token.location, "Incorrect number of arguments! Expected {} but found {}.", .{ params.len, args.nodes.len });
         }
 
+        var reordered_args = try this.allocator.alloc(?*Ast, params.len);
+        defer this.allocator.free(reordered_args);
+
+        for (reordered_args) |*arg| {
+            arg.* = null;
+        }
+
+        var began_named_args = false;
         var i: usize = 0;
-        while (i < params.len) : (i += 1) {
-            const param = params[i];
+        while (i < args.nodes.len) : (i += 1) {
             const arg = args.nodes[i];
+            var reordered_arg = arg;
+
+            var param: NamedParam = undefined;
+            var reordered_arg_index = i;
+
+            if (arg.kind == .Bind) {
+                const bind = arg.downcastConst(AstBinary);
+
+                if (bind.lhs.kind != .Ident) {
+                    return raise(error.TypeError, &this.err_msg, bind.lhs.token.location, "Expected an identifier here.", .{});
+                }
+
+                const ident = bind.lhs.downcastConst(AstIdent);
+
+                for (params) |p, param_index| {
+                    if (std.mem.eql(u8, p.name, ident.ident)) {
+                        const ra = reordered_args[param_index];
+                        if (ra == null) {
+                            param = p;
+                            reordered_arg_index = param_index;
+                            reordered_arg = bind.rhs;
+                            break;
+                        } else {
+                            return raise(error.TypeError, &this.err_msg, ident.token.location, "The parameter `{s}` has already been passed.", .{ident.ident});
+                        }
+                    }
+                } else {
+                    return raise(error.TypeError, &this.err_msg, ident.token.location, "There is no parameter named `{s}`.", .{ident.ident});
+                }
+
+                began_named_args = true;
+            } else if (began_named_args) {
+                return raise(error.TypeError, &this.err_msg, arg.token.location, "Cannot pass positional arguments after named arguments.", .{});
+            } else {
+                param = params[i];
+                reordered_arg_index = i;
+            }
 
             if (!arg.typ.?.compat(param.typ)) {
                 return raise(error.TypeError, &this.err_msg, arg.token.location, "This argument is a {} value but the parameter `{s}` is specified as a {} value.", .{ arg.typ.?, param.name, param.typ });
+            }
+
+            reordered_args[reordered_arg_index] = reordered_arg;
+        }
+
+        if (began_named_args) {
+            for (args.nodes) |*arg, arg_index| {
+                if (reordered_args[arg_index]) |reordered_arg| {
+                    arg.* = reordered_arg;
+                } else {
+                    const expected_param = params[i];
+                    return raise(error.TypeError, &this.err_msg, args.token.location, "The parameter `{s}` was never passed.", .{expected_param.name});
+                }
             }
         }
     }
@@ -791,10 +853,7 @@ pub const Typer = struct {
 
     fn typecheckIf(this: *This, _if: *AstIf) !*AstIf {
         const t_cond = (try this.typecheckNode(_if.condition)).?;
-        if (t_cond.typ.? != .Bool) {
-            return raise(error.TypeError, &this.err_msg, t_cond.token.location, "`if` expression expected a `Bool` condition value but encountered a `{}` value.", .{t_cond.typ.?});
-        }
-
+        
         var t_then: ?*AstBlock = null;
         t_then = (try this.typecheckBlock(_if.then_block));
 
@@ -814,16 +873,13 @@ pub const Typer = struct {
 
     fn typecheckWhile(this: *This, _while: *AstWhile) !*AstWhile {
         const t_cond = (try this.typecheckNode(_while.condition)).?;
-        if (t_cond.typ.? != .Bool) {
-            return raise(error.TypeError, &this.err_msg, t_cond.token.location, "`while` expression expected a `Bool` condition value but encountered a `{}` value.", .{t_cond.typ.?});
-        }
 
         var t_block: ?*AstBlock = null;
         t_block = try this.typecheckBlock(_while.block);
 
         _while.condition = t_cond;
         _while.block = t_block.?;
-        _while.typ = t_block.?.typ;
+        _while.typ = try this.unionizeTypes(&[_]Type{ t_block.?.typ.?, .None });
         return _while;
     }
 

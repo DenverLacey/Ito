@@ -99,7 +99,7 @@ while i < 5
 # for x in 0..5
 #   x
 
-var numbers = [1, 2, 3, 4, "five", Fullname{ "Six", "Seven" }]
+var numbers = [1, 2, 3, 4, "five", Fullname{ lastname: "Seven", firstname: "Six" }]
 numbers
 
 var a = True
