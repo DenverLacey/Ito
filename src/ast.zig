@@ -57,7 +57,7 @@ pub const Ast = struct {
             .Bind => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
-            .Block, .Comma, .List => try writer.print("{}", .{this.downcastConst(AstBlock)}),
+            .Block, .Comma, .List, .Tuple => try writer.print("{}", .{this.downcastConst(AstBlock)}),
 
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
@@ -118,6 +118,7 @@ pub const AstKind = enum {
     Block,
     Comma,
     List,
+    Tuple,
 
     If,
     While,

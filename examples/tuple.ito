@@ -7,3 +7,12 @@ type
 
 var pos = { x: 1.2, y: 3.4 }
 pos
+
+
+def move(pos: Pos) -> None =
+  pos.x = pos.x + 5.0
+  pos.y = pos.y - 5.0
+
+
+move(pos)
+pos

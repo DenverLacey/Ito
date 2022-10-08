@@ -341,6 +341,10 @@ pub const Typer = struct {
                 const list = node.downcast(AstBlock);
                 t_node = (try this.typecheckList(list)).asAst();
             },
+            .Tuple => {
+                const tuple = node.downcast(AstBlock);
+                t_node = (try this.typecheckTupleLiteral(tuple)).asAst();
+            },
 
             .If => {
                 const _if = node.downcast(AstIf);
@@ -706,6 +710,28 @@ pub const Typer = struct {
         }
 
         return list;
+    }
+
+    fn typecheckTupleLiteral(this: *This, tuple: *AstBlock) anyerror!*AstBlock {
+        var fields = ArrayListUnmanaged(TupleTypeDefinition.Field){};
+        errdefer fields.deinit(this.allocator);
+
+        for (tuple.nodes) |*node| {
+            if (node.*.kind != .Bind) {
+                return raise(error.TypeError, &this.err_msg, node.*.token.location, "Expecting a binding.", .{});
+            }
+
+            const bind = node.*.downcast(AstBinary);
+            const ident = bind.lhs.downcast(AstIdent);
+            const t_rhs = (try this.typecheckNode(bind.rhs)).?;
+
+            try fields.append(this.allocator, .{ .name = ident.ident, .typ = t_rhs.typ.? });
+
+            node.* = t_rhs;
+        }
+
+        tuple.typ = try this.interp.findOrAddTupleType(fields.items);
+        return tuple;
     }
 
     fn typecheckCall(this: *This, call: *AstBinary, lhs: *Ast, rhs: *Ast) !void {

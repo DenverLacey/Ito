@@ -252,6 +252,10 @@ pub const Evaluator = struct {
                 const list = node.downcast(AstBlock);
                 return try this.evaluateList(list);
             },
+            .Tuple => {
+                const tuple = node.downcast(AstBlock);
+                return try this.evaluateTupleLiteral(tuple);
+            },
 
             .If => {
                 const _if = node.downcast(AstIf);
@@ -899,6 +903,16 @@ pub const Evaluator = struct {
         }
 
         return Value{ .List = items };
+    }
+
+    fn evaluateTupleLiteral(this: *This, tuple: *AstBlock) anyerror!Value {
+        const tuple_index = switch (tuple.typ.?) {
+            .Tuple => |ti| ti,
+            else => unreachable,
+        };
+
+        const tuple_type = this.interp.tuple_types.items[tuple_index];
+        return try this.evaluateCallTupleType(tuple.typ.?, tuple_type, tuple);
     }
 
     fn evaluateIf(this: *This, _if: *AstIf) anyerror!Value {

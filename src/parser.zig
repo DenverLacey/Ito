@@ -30,6 +30,7 @@ const AstVar = ast.AstVar;
 const AstTypeBlock = ast.AstTypeBlock;
 const AstType = ast.AstType;
 const AstTypeSignature = ast.AstTypeSignature;
+const AstTupleLiteral = ast.AstTupleLiteral;
 
 const zg = @import("ziglyph");
 
@@ -1021,7 +1022,11 @@ pub const Parser = struct {
                 return (try this.parseList(token)).asAst();
             },
             .LeftCurly => {
-                todo("Implment anonymous tuple literals");
+                const block = try this.parseCommaSeparatedExpressions(.RightCurly, token);
+                _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple literal expression.");
+
+                block.kind = .Tuple;
+                return block.asAst();
             },
 
             // Operators
