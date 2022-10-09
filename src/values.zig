@@ -24,6 +24,8 @@ pub const Type = union(enum) {
     Num,
     Str,
     Type,
+    // RangeChar,
+    RangeInt,
     List: u32,
     Tuple: u32,
     Tag: u32,
@@ -64,6 +66,14 @@ pub const Type = union(enum) {
             },
             .Type => switch (other) {
                 .Type => return true,
+                else => return false,
+            },
+            // .RangeChar => switch (other) {
+            //     .RangeChar => return true,
+            //     else => return false,
+            // },
+            .RangeInt => switch (other) {
+                .RangeInt => return true,
                 else => return false,
             },
             .List => |this_index| switch (other) {
@@ -132,6 +142,15 @@ pub const Type = union(enum) {
                 .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
+            // .RangeChar => switch (with) {
+            //     .RangeChar => return true,
+            //     else => return false,
+            // },
+            .RangeInt => switch (with) {
+                .RangeInt => return true,
+                .Union => |with_index| return this.compatWithUnion(with_index),
+                else => return false,
+            },
             .List => |index| switch (with) {
                 .Any => return true,
                 .List => |with_index| return index == with_index,
@@ -187,6 +206,8 @@ pub const Type = union(enum) {
             .Num => _ = try writer.write("Num"),
             .Str => _ = try writer.write("Str"),
             .Type => _ = try writer.write("Type"),
+            // .RangeChar => _ = try writer.write("Range[Char]"),
+            .RangeInt => _ = try writer.write("Range[Int]"),
             .List => |index| {
                 const list_type = interp.list_types.items[index];
                 try writer.print("List[{}]", .{list_type.item_type});
@@ -280,15 +301,6 @@ pub const UnionTypeDefinition = struct {
     const This = @This();
 
     pub fn isSuperset(this: *const This, other: []const Type) bool {
-        // const other = switch (other_type) {
-        //     .Union => |other_index| blk: {
-        //         const interp = Interpreter.get();
-        //         const other_union = interp.union_types.items[other_index];
-        //         break :blk other_union.variants;
-        //     },
-        //     else => &[_]Type{other_type},
-        // };
-
         var superset = true;
         for (other) |other_variant| {
             var found = false;

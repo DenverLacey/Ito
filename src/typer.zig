@@ -591,7 +591,7 @@ pub const Typer = struct {
             // },
             .ExclusiveRange => {
                 if (t_lhs.typ.? == .Int and t_rhs.?.typ.? == .Int) {
-                    binary.typ = .Any; // @TODO: Make Range type
+                    binary.typ = .RangeInt;
                 } else {
                     return raise(error.TypeError, &this.err_msg, binary.token.location, "`..` requires its operands to be Int values.", .{});
                 }
@@ -942,7 +942,7 @@ pub const Typer = struct {
                 const list_type = this.interp.list_types.items[list_index];
                 return list_type.item_type;
             },
-            // .Range => todo("Implement for range type."),
+            .RangeInt => return .Int,
             else => return raise(error.TypeError, &this.err_msg, container_location, "Cannot iterator over a `{}` value.", .{container_type}),
         }
     }
