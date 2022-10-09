@@ -86,6 +86,14 @@ const Scope = struct {
         this.bindings.deinit(allocator);
     }
 
+    fn makeVarBinding(this: *This, typ: Type, global: bool) Binding {
+        return Binding{ .Var = .{ 
+            .typ = typ,
+            .index = this.num_vars,
+            .global = global,
+        }};
+    }
+
     fn addBinding(this: *This,
         allocator: Allocator,
         ident: *AstIdent,
@@ -910,9 +918,33 @@ pub const Typer = struct {
     }
 
     fn typecheckFor(this: *This, _for: *AstFor) !*AstFor {
-        _ = this;
-        _ = _for;
-        todo("Implement typecheckFor().");
+        const t_con = (try this.typecheckNode(_for.container)).?;
+
+        const it_type = try this.inferIteratorVariableType(t_con.typ.?, t_con.token.location);
+
+        var current_scope = this.currentScope();
+        const it_binding = current_scope.makeVarBinding(it_type, this.current_function == null);
+        _ = try current_scope.addBinding(this.allocator, _for.iterator, it_binding, &this.err_msg);
+
+        const t_block = try this.typecheckBlock(_for.block);
+
+        _for.typ = try this.unionizeTypes(&[_]Type{ t_block.typ.?, .None });
+        _for.container = t_con;
+        _for.block = t_block;
+        return _for;
+    }
+
+    fn inferIteratorVariableType(this: *This, container_type: Type, container_location: CodeLocation) !Type {
+        switch (container_type) {
+            .Any => return .Any,
+            .Str => return .Char,
+            .List => |list_index| {
+                const list_type = this.interp.list_types.items[list_index];
+                return list_type.item_type;
+            },
+            // .Range => todo("Implement for range type."),
+            else => return raise(error.TypeError, &this.err_msg, container_location, "Cannot iterator over a `{}` value.", .{container_type}),
+        }
     }
 
     fn typecheckDef(this: *This, def: *AstDef) !*AstInstantiateLambda {
@@ -969,7 +1001,7 @@ pub const Typer = struct {
         const def_binding = Binding{ .Lambda = lambda_binding };
         _ = try this.currentScope().addBinding(this.allocator, def.ident, def_binding, &this.err_msg);
 
-        // @NOTE:
+        // @NOTE: :LexicalScoping
         // This isn't the full story. We want to be able to refer to things in
         // the scopes above us and not just global scope but I think it'll
         // require specific machinery to achieve and so just beginning a new
@@ -986,12 +1018,12 @@ pub const Typer = struct {
         // but in this case, since we are starting a new function, we need to
         // start at 0.
         //
-        // This is a consequence of the above note and should be fixed alongside
+        // This is a consequence of the :LexicalScoping note and should be fixed alongside
         // that.
         //
         function_scope.num_vars = 0;
 
-        // @NOTE:RecursionDuplicate
+        // @NOTE: :RecursionDuplicate
         // We're adding the binding again because the evaluator will put a copy
         // of the closure on the stack because otherwise it won't be able to
         // recurse.
@@ -1066,7 +1098,7 @@ pub const Typer = struct {
         }
 
         const current_scope = this.currentScope();
-        const binding = Binding{ .Var = .{ .typ = var_type, .index = current_scope.num_vars, .global = this.current_function == null } };
+        const binding = current_scope.makeVarBinding(var_type, this.current_function == null);
         _ = try current_scope.addBinding(this.allocator, _var.ident, binding, &this.err_msg);
 
         _var.initializer = t_init;
