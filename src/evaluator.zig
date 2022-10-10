@@ -1110,9 +1110,23 @@ pub const Evaluator = struct {
     // }
 
     fn evaluateCase(this: *This, case: *AstCase) anyerror!Value {
-        _ = this;
-        _ = case;
-        todo("Implement evaluateCase");
+        var rval: Value = .None;
+
+        const cond_value = try this.evaluateNode(case.condition);
+
+        for (case.branches) |branch| {
+            const gate_value = try this.evaluateNode(branch.lhs);
+            if (gate_value.eql(cond_value)) {
+                rval = try this.evaluateNode(branch.rhs);
+                break;
+            }
+        } else {
+            if (case.default) |default| {
+                rval = try this.evaluateNode(default);
+            }
+        }
+
+        return rval;
     }
 
     fn evaluateInstantiateLambda(this: *This, lambda: *AstInstantiateLambda) anyerror!void {

@@ -120,6 +120,11 @@ x
 x = 'B'
 x
 
+case x
+  80085 -> "bewbz"
+  'B'   -> "BBBBB"
+  else  -> "UNACCEPTABLE!!!"
+
 
 var string = matrix ?? "Nebuchadnezzar"
 string
@@ -148,6 +153,5 @@ do
 
 def bar(x: Num) -> Num =
   x * x + x
-
 
 bar(4)

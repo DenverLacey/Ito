@@ -859,9 +859,39 @@ pub const Typer = struct {
     }
 
     fn typecheckCase(this: *This, case: *AstCase) !*AstCase {
-        _ = this;
-        _ = case;
-        todo("Implement typecheckCase");
+        const t_cond = (try this.typecheckNode(case.condition)).?;
+
+        var branch_types = ArrayListUnmanaged(Type){};
+        errdefer branch_types.deinit(this.allocator);
+
+        if (case.default) |default| {
+            const t_default = (try this.typecheckNode(default)).?;
+
+            try branch_types.append(this.allocator, t_default.typ.?);
+
+            case.default = t_default;
+        } else {
+            try branch_types.append(this.allocator, .None);
+        }
+
+        for (case.branches) |*branch| {
+            const t_gate = (try this.typecheckNode(branch.*.lhs)).?;
+            const t_block = (try this.typecheckNode(branch.*.rhs)).?;
+
+            if (!t_gate.typ.?.compat(t_cond.typ.?)) {
+                return raise(error.TypeError, &this.err_msg, t_gate.token.location, "Gate expression of case branch does not match the type of the condition. Expected a `{}` value but found a `{}` value.", .{ t_cond.typ.?, t_gate.typ.? });
+            }
+
+            try branch_types.append(this.allocator, t_block.typ.?);
+
+            branch.*.lhs = t_gate;
+            branch.*.rhs = t_block;
+        }
+
+        case.typ = try this.interp.unionizeTypes(branch_types.items);
+        case.condition = t_cond;
+
+        return case;
     }
 
     fn typecheckDef(this: *This, def: *AstDef) !*AstInstantiateLambda {
