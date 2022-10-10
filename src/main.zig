@@ -2,6 +2,11 @@
 // - Check out Ada for language design inspiration
 // - Add ranged integer types like this:
 //      `type Byte = 0..256`
+// - Fix Bug with GC that crashes when a value being returned a block gets GC'd
+//   before it gets assigned. (Could just put last value on the stack in the
+//   block onto the end of the stack of the parent to prevent it from begin
+//   GC'd.)
+//
 
 const std = @import("std");
 const interpreter = @import("interpreter.zig");

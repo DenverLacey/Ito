@@ -32,6 +32,7 @@ const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
+const AstCase = ast.AstCase;
 const AstDef = ast.AstDef;
 const AstInstantiateLambda = ast.AstInstantiateLambda;
 const AstParam = ast.AstParam;
@@ -65,6 +66,7 @@ const Binding = union(enum) {
 
 const VarBinding = struct {
     typ: Type,
+    type_open: bool = false,
     index: usize,
     global: bool,
 };
@@ -128,6 +130,7 @@ const Scope = struct {
 };
 
 const CurrentFunction = struct {
+    name: []const u8,
     infer_return_type: bool = false,
     return_types: ArrayListUnmanaged(Type) = .{},
 };
@@ -183,106 +186,6 @@ pub const Typer = struct {
         try this.nodes.append(this.allocator, node);
     }
 
-    fn flattenUnionTypes(this: *This, flattened: *AutoArrayHashMapUnmanaged(Type, void), types: []const Type) anyerror!void {
-        for (types) |typ| {
-            switch (typ) {
-                .Union => |union_index| {
-                    const union_type = this.interp.union_types.items[union_index];
-                    try this.flattenUnionTypes(flattened, union_type.variants);
-                },
-                else => try flattened.put(this.allocator, typ, {}),
-            }
-        }
-    }
-
-    fn unionizeTypes(this: *This, types: []const Type) !Type {
-        std.debug.assert(types.len > 0);
-
-        var flattened = AutoArrayHashMapUnmanaged(Type, void){};
-        defer flattened.deinit(this.allocator);
-        
-        try this.flattenUnionTypes(&flattened, types);
-
-        const flattened_types = flattened.keys();
-        
-        if (flattened_types.len == 1) {
-            return flattened_types[0];
-        }
-
-        // check for equality and Any
-        {
-            var i: usize = 0;
-            while (i < flattened_types.len - 1) : (i += 1) {
-                const ta = flattened_types[i];
-                const tb = flattened_types[i + 1];
-
-                if (ta == .Any or tb == .Any) {
-                    return .Any;
-                }
-
-                if (!ta.eql(tb)) {
-                    break;
-                }
-            } else {
-                return flattened_types[0];
-            }
-        }
-
-        var found_index: ?usize = null;
-        for (this.interp.union_types.items) |union_type, union_index| {
-            if (union_type.variants.len != flattened_types.len)
-                continue;
-            
-            for (union_type.variants) |union_variant| {
-                var found = false;
-                for (flattened_types) |types_variant| {
-                    if (types_variant.eql(union_variant)) {
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found) 
-                    break;
-            } else {
-                found_index = union_index;
-            }
-            
-            break;
-        }
-
-        if (found_index) |union_index| {
-            return Type{ .Union = @intCast(u32, union_index) };
-        }
-
-        const variants = try this.allocator.alloc(Type, flattened_types.len);
-        for (flattened_types) |typ, i| {
-            variants[i] = typ;
-        }
-
-        const defn = UnionTypeDefinition{ .variants = variants };
-
-        try this.interp.union_types.append(this.allocator, defn);
-        return Type{ .Union = @intCast(u32, this.interp.union_types.items.len - 1) };
-    }
-
-    fn unionTypeWithVariantsRemoved(this: *This, union_type: UnionTypeDefinition, to_remove: []const Type) !Type {
-        var variants = ArrayListUnmanaged(Type){};
-        errdefer variants.deinit(this.allocator);
-
-        for (union_type.variants) |variant| {
-            for (to_remove) |tr| {
-                if (variant.eql(tr)) {
-                    break;
-                }
-            } else {
-                try variants.append(this.allocator, variant);
-            }
-        }
-
-        return try this.unionizeTypes(variants.items);
-    }
-
     fn typecheckNodeAndAdd(this: *This, node: *Ast) !void {
         const t_node = (try this.typecheckNode(node)) orelse return;
         try this.addNode(t_node);
@@ -330,7 +233,8 @@ pub const Typer = struct {
             .Index,
             .Call,
             .ExclusiveRange,
-            .NoneOr => {
+            .NoneOr,
+            .CaseBranch => {
                 const binary = node.downcast(AstBinary);
                 t_node = (try this.typecheckBinary(binary)).asAst();
             },
@@ -365,6 +269,10 @@ pub const Typer = struct {
             .For => {
                 const _for = node.downcast(AstFor);
                 t_node = (try this.typecheckFor(_for)).asAst();
+            },
+            .Case => {
+                const case = node.downcast(AstCase);
+                t_node = (try this.typecheckCase(case)).asAst();
             },
             .Def => {
                 const def = node.downcast(AstDef);
@@ -510,7 +418,7 @@ pub const Typer = struct {
                             write_copied += 1;
                         }
 
-                        unary.typ = try this.unionizeTypes(copied);
+                        unary.typ = try this.interp.unionizeTypes(copied);
                     },
                     .None => return raise(error.TypeError, &this.err_msg, t_sub.token.location, "Unwrap of `None` value will always fail.", .{}),
                     else => return raise(error.TypeError, &this.err_msg, t_sub.token.location, "`?` operator expected a potentially `None` value but encountered a `{}` value.", .{t_sub.typ.?}),
@@ -612,7 +520,7 @@ pub const Typer = struct {
                         // Unionize lhs type with rhs type.
                         //
 
-                        binary.typ = try this.unionTypeWithVariantsRemoved(union_type, &[_]Type{.None});
+                        binary.typ = try this.interp.unionTypeWithVariantsRemoved(union_type, &[_]Type{.None});
                     },
                     .None => {
                         binary.typ = t_rhs.?.typ.?;
@@ -635,14 +543,14 @@ pub const Typer = struct {
         type_a: Type,
         type_b: Type
     ) !Type {
-        const int_or_num_type = try this.unionizeTypes(&[_]Type{ .Int, .Num });
+        const int_or_num_type = try this.interp.unionizeTypes(&[_]Type{ .Int, .Num });
 
         var ret_type: Type = undefined;
         if (type_a.compat(int_or_num_type) and type_b.compat(int_or_num_type)) {
             if (type_a == .Num or type_b == .Num) {
                 ret_type = .Num;
             } else {
-                ret_type = try this.unionizeTypes(&[_]Type{ type_a, type_b });
+                ret_type = try this.interp.unionizeTypes(&[_]Type{ type_a, type_b });
             }
         } else {
             return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an Int or Num value.", .{});
@@ -713,7 +621,7 @@ pub const Typer = struct {
         } else if (item_types.items.len == 1) {
             list.typ = try this.interp.findOrAddListType(item_types.items[0]);
         } else {
-            const item_type = try this.unionizeTypes(item_types.items);
+            const item_type = try this.interp.unionizeTypes(item_types.items);
             list.typ = try this.interp.findOrAddListType(item_type);
         }
 
@@ -901,7 +809,7 @@ pub const Typer = struct {
         _if.condition = t_cond;
         _if.then_block = t_then.?;
         _if.else_block = t_else;
-        _if.typ = try this.unionizeTypes(&[_]Type{t_then.?.typ.?, if (t_else) |te| te.typ.? else .None});
+        _if.typ = try this.interp.unionizeTypes(&[_]Type{t_then.?.typ.?, if (t_else) |te| te.typ.? else .None});
         return _if;
     }
 
@@ -913,11 +821,14 @@ pub const Typer = struct {
 
         _while.condition = t_cond;
         _while.block = t_block.?;
-        _while.typ = try this.unionizeTypes(&[_]Type{ t_block.?.typ.?, .None });
+        _while.typ = try this.interp.unionizeTypes(&[_]Type{ t_block.?.typ.?, .None });
         return _while;
     }
 
     fn typecheckFor(this: *This, _for: *AstFor) !*AstFor {
+        try this.beginScope();
+        defer this.endScope();
+
         const t_con = (try this.typecheckNode(_for.container)).?;
 
         const it_type = try this.inferIteratorVariableType(t_con.typ.?, t_con.token.location);
@@ -928,7 +839,7 @@ pub const Typer = struct {
 
         const t_block = try this.typecheckBlock(_for.block);
 
-        _for.typ = try this.unionizeTypes(&[_]Type{ t_block.typ.?, .None });
+        _for.typ = try this.interp.unionizeTypes(&[_]Type{ t_block.typ.?, .None });
         _for.container = t_con;
         _for.block = t_block;
         return _for;
@@ -947,11 +858,17 @@ pub const Typer = struct {
         }
     }
 
+    fn typecheckCase(this: *This, case: *AstCase) !*AstCase {
+        _ = this;
+        _ = case;
+        todo("Implement typecheckCase");
+    }
+
     fn typecheckDef(this: *This, def: *AstDef) !*AstInstantiateLambda {
         const old_function = this.current_function;
         defer this.current_function = old_function;
 
-        this.current_function = CurrentFunction{ .infer_return_type = def.ret_type == null };
+        this.current_function = CurrentFunction{ .name = def.ident.ident, .infer_return_type = def.ret_type == null };
 
         if (def.ret_type) |ret_type_sig| {
             const ret_type = try this.typecheckTypeSignature(ret_type_sig);
@@ -1072,10 +989,8 @@ pub const Typer = struct {
                 //
                 return raise(error.TypeError, &this.err_msg, function_body.token.location, "Return type specified to be `{}` but the lambda body returns a {} value.", .{return_type, function_body.typ.?});
             }
-        } else {
-            if (return_type != .Any and return_type != .None) {
-                return raise(error.TypeError, &this.err_msg, function_body.token.location, "Return type specified to be `{}` but the lambda body returns a None value.", .{return_type});
-            }
+        } else if (return_type != .Any and return_type != .None) {
+            return raise(error.TypeError, &this.err_msg, function_body.token.location, "Return type specified to be `{}` but the lambda body returns a None value.", .{return_type});
         }
 
         var lambda_node = try this.allocator.create(AstInstantiateLambda);
@@ -1180,11 +1095,11 @@ pub const Typer = struct {
                     variants[i] = try this.typecheckTypeSignature(union_data.variants[i]);
                 }
 
-                typ = try this.unionizeTypes(variants);
+                typ = try this.interp.unionizeTypes(variants);
             },
             .Optional => |inner_sig| {
                 const inner_type = try this.typecheckTypeSignature(inner_sig);
-                typ = try this.unionizeTypes(&[_]Type{inner_type, .None});
+                typ = try this.interp.unionizeTypes(&[_]Type{inner_type, .None});
             }
         }
 

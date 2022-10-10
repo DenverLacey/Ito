@@ -1,5 +1,6 @@
-var sum = 0
-for x in 1..6
-  sum = sum + x
+var x = 69
 
-sum
+case x
+  69   -> "nice!"
+  420  -> "dank!"
+  else -> "idek?"

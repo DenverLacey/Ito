@@ -54,7 +54,8 @@ pub const Ast = struct {
             .Dot,
             .ExclusiveRange,
             .NoneOr,
-            .Bind => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+            .Bind,
+            .CaseBranch => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
             .Block, .Comma, .List, .Tuple => try writer.print("{}", .{this.downcastConst(AstBlock)}),
@@ -62,6 +63,7 @@ pub const Ast = struct {
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
             .For => try writer.print("{}", .{this.downcastConst(AstFor)}),
+            .Case => try writer.print("{}", .{this.downcastConst(AstCase)}),
             .Def => try writer.print("{}", .{this.downcastConst(AstDef)}),
             .Param => try writer.print("{}", .{this.downcastConst(AstParam)}),
             .Var => try writer.print("{}", .{this.downcastConst(AstVar)}),
@@ -113,6 +115,7 @@ pub const AstKind = enum {
     ExclusiveRange,
     NoneOr,
     Bind,
+    CaseBranch,
 
     // Blocks
     Block,
@@ -123,6 +126,7 @@ pub const AstKind = enum {
     If,
     While,
     For,
+    Case,
     Def,
     Param,
     Var,
@@ -364,6 +368,32 @@ pub const AstFor = struct {
             .iterator = iterator,
             .container = container,
             .block = block
+        };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstCase = struct {
+    kind: AstKind,
+    token: Token,
+    typ: ?Type,
+    condition: *Ast,
+    default: ?*Ast,
+    branches: []*AstBinary,
+
+    const This = @This();
+
+    pub fn init(token: Token, condition: *Ast, default: ?*Ast, branches: []*AstBinary) This {
+        return This{
+            .kind = .Case,
+            .token = token,
+            .typ = null,
+            .condition = condition,
+            .default = default,
+            .branches = branches,
         };
     }
 

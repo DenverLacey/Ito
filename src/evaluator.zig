@@ -26,6 +26,7 @@ const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
+const AstCase = ast.AstCase;
 const AstDef = ast.AstDef;
 const AstInstantiateLambda = ast.AstInstantiateLambda;
 const AstParam = ast.AstParam;
@@ -242,6 +243,9 @@ pub const Evaluator = struct {
             .Bind => {
                 return raise(error.InternalError, &this.err_msg, node.token.location, "Bind node reached evaluation.", .{});
             },
+            .CaseBranch => {
+                return raise(error.InternalError, &this.err_msg, node.token.location, "CaseBranch node reached evaluation.", .{});
+            },
 
             // Blocks
             .Block, .Comma => {
@@ -268,6 +272,10 @@ pub const Evaluator = struct {
             .For => {
                 const _for = node.downcast(AstFor);
                 return try this.evaluateFor(_for);
+            },
+            .Case => {
+                const case = node.downcast(AstCase);
+                return try this.evaluateCase(case);
             },
             .Def => {
                 return raise(error.InternalError, &this.err_msg, node.token.location, "AstDef node reached evaluation.", .{});
@@ -1100,6 +1108,12 @@ pub const Evaluator = struct {
     //     const closure_value = Value{ .Closure = closure };
     //     try this.stack.pushVariable(this.allocator, this.currentScope(), def.ident.ident, closure_value);
     // }
+
+    fn evaluateCase(this: *This, case: *AstCase) anyerror!Value {
+        _ = this;
+        _ = case;
+        todo("Implement evaluateCase");
+    }
 
     fn evaluateInstantiateLambda(this: *This, lambda: *AstInstantiateLambda) anyerror!void {
         const def = this.interp.lambdas.items[lambda.lambda_index];

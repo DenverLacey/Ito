@@ -75,6 +75,7 @@ do
   "In a block"
   None
 
+
 var age =
   if True
     23
@@ -85,10 +86,12 @@ age
 var yob = 2022 - age
 yob
 
+
 var matrix =
   if yob > 2000
     "There is no spoon"
 matrix
+
 
 var i = 0
 while i < 5
@@ -96,11 +99,14 @@ while i < 5
   var j = i + 1
   j
 
+
 for x in 0..5
   x
 
+
 var numbers = [1, 2, 3, 4, "five", Fullname{ lastname: "Seven", firstname: "Six" }]
 numbers
+
 
 var a = True
 a
@@ -108,10 +114,12 @@ var b = False
 b
 a and b
 
+
 var x: Int|Char = 80085
 x
 x = 'B'
 x
+
 
 var string = matrix ?? "Nebuchadnezzar"
 string
@@ -127,15 +135,19 @@ string
 # string = matrix?
 # string
 
+
 def foo(x: Int|Num) =
   x * x
+
 
 do
   var x: Int|Num = 2
   var y: Int|Num = 4.6
   x + y
 
+
 def bar(x: Num) -> Num =
   x * x + x
+
 
 bar(4)

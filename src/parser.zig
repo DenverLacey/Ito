@@ -23,6 +23,7 @@ const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
+const AstCase = ast.AstCase;
 const AstDef = ast.AstDef;
 const AstParam = ast.AstParam;
 const AstVarBlock = ast.AstVarBlock;
@@ -112,6 +113,7 @@ pub const Token = struct {
             // Keywords
             .Do => .None,
             .Pass => .None,
+            .Case => .None,
             .If => .None,
             .Else => .None,
             .Elif => .None,
@@ -175,6 +177,7 @@ pub const Token = struct {
                 // Keywords
                 .Do => try writer.print("do", .{}),
                 .Pass => try writer.print("pass", .{}),
+                .Case => try writer.print("case", .{}),
                 .If => try writer.print("if", .{}),
                 .Else => try writer.print("else", .{}),
                 .Elif => try writer.print("elif", .{}),
@@ -238,6 +241,7 @@ pub const TokenKind = enum {
     // Keywords
     Do,
     Pass,
+    Case,
     If,
     Else,
     Elif,
@@ -296,6 +300,7 @@ pub const TokenData = union(TokenKind) {
     // Keywords
     Do,
     Pass,
+    Case,
     If,
     Else,
     Elif,
@@ -357,6 +362,7 @@ pub const TokenData = union(TokenKind) {
             // Keywords
             .Do => _ = try writer.write(".Do"),
             .Pass => _ = try writer.write(".Pass"),
+            .Case => _ = try writer.write(".Case"),
             .If => _ = try writer.write(".If"),
             .Else => _ = try writer.write(".Else"),
             .Elif => _ = try writer.write(".Elif"),
@@ -390,7 +396,7 @@ pub const TokenPrecedence = enum {
     Term, // + -
     Factor, // * / %
     Unary, // ! ~
-    Call, // . () []
+    Call, // . () [] {}
     Primary,
 
     fn next(this: TokenPrecedence) TokenPrecedence {
@@ -406,7 +412,6 @@ pub const Tokenizer = struct {
     filename: []const u8,
     peeked_tokens: ArrayListUnmanaged(Token),
     previous_was_newline: bool,
-    previous_token_kind: TokenKind,
     indentation: usize,
 
     line: usize,
@@ -423,7 +428,6 @@ pub const Tokenizer = struct {
             .filename = filename,
             .peeked_tokens = ArrayListUnmanaged(Token){},
             .previous_was_newline = false,
-            .previous_token_kind = .Newline,
             .indentation = 0,
             .line = 1,
             .column = 1,
@@ -563,8 +567,6 @@ pub const Tokenizer = struct {
             } else {
                 token = try this.tokenizePunctuation();
             }
-
-            this.previous_token_kind = token.?.data;
         } else {
             token = null;
         }
@@ -713,6 +715,8 @@ pub const Tokenizer = struct {
             Token.init(this.indentation, .Do, location)
         else if (std.mem.eql(u8, word, "pass"))
             Token.init(this.indentation, .Pass, location)
+        else if (std.mem.eql(u8, word, "case"))
+            Token.init(this.indentation, .Case, location)
         else if (std.mem.eql(u8, word, "if"))
             Token.init(this.indentation, .If, location)
         else if (std.mem.eql(u8, word, "else"))
@@ -1050,6 +1054,9 @@ pub const Parser = struct {
             .For => {
                 return (try this.parseFor(token)).asAst();
             },
+            .Case => {
+                return (try this.parseCase(token)).asAst();
+            },
             // .Var => {
             //     return (try this.parseVar(token)).asAst();
             // },
@@ -1292,6 +1299,71 @@ pub const Parser = struct {
         const block = try this.parseBlock(token.indentation);
 
         return this.createNode(AstFor, .{ token, iterator, container, block });
+    }
+
+    fn parseCase(this: *This, token: Token) !*AstCase {
+        const cond = try this.parseExpression();
+
+        // @Copynpaste: parseBlock()
+        try this.skipNewlines();
+        const first = (try this.tokenizer.peek(0)) orelse return raise(error.ParseError, &this.err_msg, this.tokenizer.currentLocation(), "Unexpected end of file.", .{});
+        if (first.indentation <= token.indentation) {
+            return raise(error.ParseError, &this.err_msg, first.location, "Expressions inside a block must be at a higher indentation level than the block itself.", .{});
+        }
+        if (first.data == .Pass) {
+            _ = try this.tokenizer.next();
+            todo("Implement passing case blocks");
+        }
+
+        var default: ?*Ast = null;
+        var branches = ArrayListUnmanaged(*AstBinary){};
+
+        while (true) {
+            try this.skipNewlines();
+            if (try this.tokenizer.peek(0)) |t| {
+                if (t.indentation != first.indentation) {
+                    if (t.indentation > first.indentation) {
+                        return raise(error.ParseError, &this.err_msg, t.location, "Expression is at incorrect indentation level for block.", .{});
+                    }
+                    break;
+                }
+
+                if (t.data == .Else) {
+                    if (default != null) {
+                        return raise(error.ParseError, &this.err_msg, t.location, "Can only be one `else` branch in a `case` expression.", .{});
+                    }
+
+                    _ = try this.tokenizer.next();
+                    _ = try this.expect(.Arrow, "Expected `->` after `else` keyword.");
+
+                    if (try this.match(.Newline)) |newline_token| {
+                        default = (try this.parseBlock(newline_token.indentation)).asAst();
+                    } else {
+                        default = try this.parseExpression();
+                    }
+                } else {
+                    try branches.append(this.allocator, try this.parseCaseBranch());
+                }
+            } else {
+                break;
+            }
+        }
+
+        return try this.createNode(AstCase, .{ token, cond, default, branches.items });
+    }
+    
+    fn parseCaseBranch(this: *This) !*AstBinary {
+        const gate = try this.parseExpression();
+        const arrow_token = try this.expect(.Arrow, "Expected `->` after case branch expression.");
+
+        var body: *Ast = undefined;
+        if (try this.match(.Newline)) |newline_token| {
+            body = (try this.parseBlock(newline_token.indentation)).asAst();
+        } else {
+            body = try this.parseExpression();
+        }
+
+        return try this.createNode(AstBinary, .{ .CaseBranch, arrow_token, gate, body });
     }
 
     fn parseDef(this: *This, token: Token) !*AstDef {

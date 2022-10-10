@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const parser = @import("parser.zig");
 const Parser = parser.Parser;
@@ -40,6 +41,7 @@ pub const LambdaDefinition = struct {
 pub const Interpreter = struct {
     allocator: Allocator = undefined,
 
+    tags: ArrayListUnmanaged([]const u8) = .{},
     lambdas: ArrayListUnmanaged(LambdaDefinition) = .{},
 
     // Composite Types
@@ -53,6 +55,24 @@ pub const Interpreter = struct {
 
     pub fn get() *This {
         return &interpreter;
+    }
+
+    pub fn findOrAddTag(this: *This, tag: []const u8) ![]const u8 {
+        if (this.findTag(tag)) |t| {
+            return t;
+        }
+
+        try this.tags.append(this.allocator, tag);
+        return this.tags.items[this.tags.items.len - 1];
+    }
+
+    pub fn findTag(this: *This, tag: []const u8) ?[]const u8 {
+        for (this.tags.items) |t| {
+            if (std.mem.eql(u8, t, tag)) {
+                return t;
+            }
+        }
+        return null;
     }
 
     pub fn addLambda(this: *This, lambda: LambdaDefinition) !usize {
@@ -178,6 +198,106 @@ pub const Interpreter = struct {
         try this.lambda_types.append(this.allocator, lambda_def);
 
         return Type{ .Lambda = @intCast(u32, this.lambda_types.items.len - 1) };
+    }
+
+    pub fn unionizeTypes(this: *This, types: []const Type) !Type {
+        std.debug.assert(types.len > 0);
+
+        var flattened = AutoArrayHashMapUnmanaged(Type, void){};
+        defer flattened.deinit(this.allocator);
+        
+        try this.flattenUnionTypes(&flattened, types);
+
+        const flattened_types = flattened.keys();
+        
+        if (flattened_types.len == 1) {
+            return flattened_types[0];
+        }
+
+        // check for equality and Any
+        {
+            var i: usize = 0;
+            while (i < flattened_types.len - 1) : (i += 1) {
+                const ta = flattened_types[i];
+                const tb = flattened_types[i + 1];
+
+                if (ta == .Any or tb == .Any) {
+                    return .Any;
+                }
+
+                if (!ta.eql(tb)) {
+                    break;
+                }
+            } else {
+                return flattened_types[0];
+            }
+        }
+
+        var found_index: ?usize = null;
+        for (this.union_types.items) |union_type, union_index| {
+            if (union_type.variants.len != flattened_types.len)
+                continue;
+            
+            for (union_type.variants) |union_variant| {
+                var found = false;
+                for (flattened_types) |types_variant| {
+                    if (types_variant.eql(union_variant)) {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) 
+                    break;
+            } else {
+                found_index = union_index;
+            }
+            
+            break;
+        }
+
+        if (found_index) |union_index| {
+            return Type{ .Union = @intCast(u32, union_index) };
+        }
+
+        const variants = try this.allocator.alloc(Type, flattened_types.len);
+        for (flattened_types) |typ, i| {
+            variants[i] = typ;
+        }
+
+        const defn = UnionTypeDefinition{ .variants = variants };
+
+        try this.union_types.append(this.allocator, defn);
+        return Type{ .Union = @intCast(u32, this.union_types.items.len - 1) };
+    }
+
+    fn flattenUnionTypes(this: *This, flattened: *AutoArrayHashMapUnmanaged(Type, void), types: []const Type) anyerror!void {
+        for (types) |typ| {
+            switch (typ) {
+                .Union => |union_index| {
+                    const union_type = this.union_types.items[union_index];
+                    try this.flattenUnionTypes(flattened, union_type.variants);
+                },
+                else => try flattened.put(this.allocator, typ, {}),
+            }
+        }
+    }
+
+    pub fn unionTypeWithVariantsRemoved(this: *This, union_type: UnionTypeDefinition, to_remove: []const Type) !Type {
+        var variants = ArrayListUnmanaged(Type){};
+        errdefer variants.deinit(this.allocator);
+
+        for (union_type.variants) |variant| {
+            for (to_remove) |tr| {
+                if (variant.eql(tr)) {
+                    break;
+                }
+            } else {
+                try variants.append(this.allocator, variant);
+            }
+        }
+
+        return try this.unionizeTypes(variants.items);
     }
 };
 
