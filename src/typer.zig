@@ -213,7 +213,8 @@ pub const Typer = struct {
             // Unary
             .Negate,
             .Not,
-            .Unwrap => {
+            .Unwrap,
+            .Show => {
                 const unary = node.downcast(AstUnary);
                 t_node = (try this.typecheckUnary(unary)).asAst();
             },
@@ -234,7 +235,8 @@ pub const Typer = struct {
             .Call,
             .ExclusiveRange,
             .NoneOr,
-            .CaseBranch => {
+            .CaseBranch,
+            .Format => {
                 const binary = node.downcast(AstBinary);
                 t_node = (try this.typecheckBinary(binary)).asAst();
             },
@@ -424,6 +426,9 @@ pub const Typer = struct {
                     else => return raise(error.TypeError, &this.err_msg, t_sub.token.location, "`?` operator expected a potentially `None` value but encountered a `{}` value.", .{t_sub.typ.?}),
                 }
             },
+            .Show => {
+                unary.typ = .Str;
+            },
             else => return raise(error.InternalError, &this.err_msg, unary.token.location, "`{}` is not a unary node.", .{unary.kind}),
         }
 
@@ -513,7 +518,7 @@ pub const Typer = struct {
                     .Union => |union_index| {
                         const union_type = this.interp.union_types.items[union_index];
                         if (!union_type.isSuperset(&[_]Type{.None})) {
-                            return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`??` requires it's first operand to be a potentially `None` value but encountered a `{}` value.", .{t_lhs.typ.?});
+                            return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`??` requires its first operand to be a potentially `None` value but encountered a `{}` value.", .{t_lhs.typ.?});
                         }
 
                         // @TODO:
@@ -525,8 +530,19 @@ pub const Typer = struct {
                     .None => {
                         binary.typ = t_rhs.?.typ.?;
                     },
-                    else => return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`??` requires it's first operand to ba a potentially `None` value but encountered a `{}` value.", .{t_lhs.typ.?}),
+                    else => return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`??` requires its first operand to ba a potentially `None` value but encountered a `{}` value.", .{t_lhs.typ.?}),
                 }
+            },
+            .Format => {
+                if (t_lhs.typ.? != .Str) {
+                    return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "`$` requires its first operand to be a `Str` value but encountered a `{}` value.", .{t_lhs.typ.?});
+                }
+
+                if (t_rhs.?.typ.? != .List) {
+                    return raise(error.TypeError, &this.err_msg, t_rhs.?.token.location, "`$` requires its second oeprand to be a `List` value but encountered a `{}` value.", .{t_rhs.?.typ.?});
+                }
+
+                binary.typ = .Str;
             },
             else => return raise(error.InternalError, &this.err_msg, binary.token.location, "`{}` is not a binary node.", .{binary.kind}),
         }

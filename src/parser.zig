@@ -109,6 +109,7 @@ pub const Token = struct {
             .QuestionMark => .Unary,
             .DoubleQuestionMark => .NoneOr,
             .Arrow => .None, // @TODO: When we do annonymous lambdas maybe we want a particular precedence.
+            .Dollar => .Call, // @NOTE: This might be too high a precedence
 
             // Keywords
             .Do => .None,
@@ -173,6 +174,7 @@ pub const Token = struct {
                 .QuestionMark => try writer.print("?", .{}),
                 .DoubleQuestionMark => try writer.print("??", .{}),
                 .Arrow => try writer.print("->", .{}),
+                .Dollar => try writer.print("$", .{}),
 
                 // Keywords
                 .Do => try writer.print("do", .{}),
@@ -237,6 +239,7 @@ pub const TokenKind = enum {
     QuestionMark,
     DoubleQuestionMark,
     Arrow,
+    Dollar,
 
     // Keywords
     Do,
@@ -296,6 +299,7 @@ pub const TokenData = union(TokenKind) {
     QuestionMark,
     DoubleQuestionMark,
     Arrow,
+    Dollar,
 
     // Keywords
     Do,
@@ -358,6 +362,7 @@ pub const TokenData = union(TokenKind) {
             .QuestionMark => _ = try writer.write(".QuestionMark"),
             .DoubleQuestionMark => _ = try writer.write(".DoubleQuestionMark"),
             .Arrow => _ = try writer.write(".Arrow"),
+            .Dollar => _ = try writer.write(".Dollar"),
 
             // Keywords
             .Do => _ = try writer.write(".Do"),
@@ -779,6 +784,7 @@ pub const Tokenizer = struct {
                 Token.init(this.indentation, .DoubleQuestionMark, location)
             else
                 Token.init(this.indentation, .QuestionMark, location),
+            '$' => Token.init(this.indentation, .Dollar, location),
             else => |c| raise(error.ParseError, this.err_msg, location, "Invalid operator `{u}`.", .{c}),
         };
     }
@@ -1040,6 +1046,9 @@ pub const Parser = struct {
             .Dash => {
                 return (try this.parseUnary(.Negate, token)).asAst();
             },
+            .Dollar => {
+                return (try this.parseUnary(.Show, token)).asAst();
+            },
 
             // Keywords
             .Do => {
@@ -1124,6 +1133,9 @@ pub const Parser = struct {
             },
             .DoubleQuestionMark => {
                 return (try this.parseBinary(prec, .NoneOr, token, previous)).asAst();
+            },
+            .Dollar => {
+                return (try this.parseBinary(prec, .Format, token, previous)).asAst();
             },
 
             .LeftParen => {
@@ -1312,7 +1324,7 @@ pub const Parser = struct {
         }
         if (first.data == .Pass) {
             _ = try this.tokenizer.next();
-            todo("Implement passing case blocks");
+            return try this.createNode(AstCase, .{ token, cond, null, &[0]*AstBinary{} });
         }
 
         var default: ?*Ast = null;

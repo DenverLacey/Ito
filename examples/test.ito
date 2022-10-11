@@ -1,6 +1,5 @@
-var x = 421
+var x = 69420
+var s = $x
 
-case x
-  69   -> "nice!"
-  420  -> "dank!"
-  else -> "idek?"
+x
+s

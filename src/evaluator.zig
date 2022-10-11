@@ -209,7 +209,8 @@ pub const Evaluator = struct {
             // Unary
             .Negate,
             .Not,
-            .Unwrap => {
+            .Unwrap,
+            .Show => {
                 const unary = node.downcast(AstUnary);
                 return try this.evaluateUnary(unary);
             },
@@ -229,7 +230,8 @@ pub const Evaluator = struct {
             .Call,
             .Dot,
             .ExclusiveRange,
-            .NoneOr => {
+            .NoneOr,
+            .Format => {
                 const binary = node.downcast(AstBinary);
                 return try this.evaluateBinary(binary);
             },
@@ -358,6 +360,7 @@ pub const Evaluator = struct {
             .Negate => this.evaluateNegate(unary.sub),
             .Not => this.evaluateNot(unary.sub),
             .Unwrap => this.evaluateUnwrap(unary.sub),
+            .Show => this.evaluateShow(unary.sub),
             else => raise(error.RuntimeError, &this.err_msg, unary.token.location, "Invalid unary operation", .{}),
         };
     }
@@ -386,6 +389,16 @@ pub const Evaluator = struct {
             raise(error.RuntimeError, &this.err_msg, sub_node.token.location, "Attempted unwrap of a `None` value.", .{})
         else
             sub;
+    }
+
+    fn evaluateShow(this: *This, sub_node: *Ast) anyerror!Value {
+        const sub = try this.evaluateNode(sub_node);
+
+        const s = try std.fmt.allocPrint(this.allocator, "{}", .{sub});
+        defer this.allocator.free(s);
+
+        const rval = Value{ .Str = try this.gc.copyString(s) };
+        return rval;
     }
 
     // fn evaluatePrintln(this: *This, sub_node: *Ast) anyerror!void {
@@ -417,6 +430,7 @@ pub const Evaluator = struct {
             .Dot => this.evaluateDot(binary.lhs, binary.rhs.downcast(AstIdent)),
             .ExclusiveRange => this.evaluateExclusiveRange(binary.lhs, binary.rhs),
             .NoneOr => this.evaluateNoneOr(binary.lhs, binary.rhs),
+            .Format => this.evaluateFormat(binary.lhs, binary.rhs),
             else => raise(error.RuntimeError, &this.err_msg, binary.token.location, "Invalid binary operation", .{}),
         };
     }
@@ -820,6 +834,13 @@ pub const Evaluator = struct {
         }
 
         return lhs_value;
+    }
+
+    fn evaluateFormat(this: *This, lhs: *Ast, rhs: *Ast) anyerror!Value {
+        _ = this;
+        _ = lhs;
+        _ = rhs;
+        todo("Implement evaluateFormat");
     }
 
     fn evaluateAssign(this: *This, assign: *AstBinary) anyerror!void {

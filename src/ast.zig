@@ -35,7 +35,8 @@ pub const Ast = struct {
             // Unary
             .Negate,
             .Not,
-            .Unwrap => try writer.print("{}", .{this.downcastConst(AstUnary)}),
+            .Unwrap,
+            .Show => try writer.print("{}", .{this.downcastConst(AstUnary)}),
 
             // Binary
             .Assign,
@@ -55,7 +56,8 @@ pub const Ast = struct {
             .ExclusiveRange,
             .NoneOr,
             .Bind,
-            .CaseBranch => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+            .CaseBranch,
+            .Format => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
             .Block, .Comma, .List, .Tuple => try writer.print("{}", .{this.downcastConst(AstBlock)}),
@@ -96,6 +98,7 @@ pub const AstKind = enum {
     Negate,
     Not,
     Unwrap,
+    Show,
 
     // Binary
     Assign,
@@ -116,6 +119,7 @@ pub const AstKind = enum {
     NoneOr,
     Bind,
     CaseBranch,
+    Format,
 
     // Blocks
     Block,
