@@ -57,7 +57,8 @@ pub const Ast = struct {
             .NoneOr,
             .Bind,
             .CaseBranch,
-            .Format => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+            .Format,
+            .PartialCopy => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
             .Block, .Comma, .List, .Tuple => try writer.print("{}", .{this.downcastConst(AstBlock)}),
@@ -120,6 +121,7 @@ pub const AstKind = enum {
     Bind,
     CaseBranch,
     Format,
+    PartialCopy,
 
     // Blocks
     Block,

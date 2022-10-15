@@ -939,6 +939,34 @@ pub const Parser = struct {
         }
     }
 
+    fn matchPartialCopy(this: *This) !bool {
+        var i: usize = 0;
+        while (true) {
+            const peeked = (try this.tokenizer.peek(i)) orelse return false;
+            if (peeked.data == .Semicolon) {
+                i += 1;
+                break;
+            } else if (peeked.data == .RightCurly) {
+                return false;
+            }
+
+            i += 1;
+        }
+
+        const should_be_ident = (try this.tokenizer.peek(i)) orelse return false;
+        if (should_be_ident.data != .Ident) {
+            return false;
+        }
+        i += 1;
+
+        const should_be_colon = (try this.tokenizer.peek(i)) orelse return false;
+        if (should_be_colon.data != .Colon) {
+            return false;
+        }
+
+        return true;
+    }
+
     fn parseDeclaration(this: *This) anyerror!*Ast {
         return if (try this.match(.Def)) |token|
             (try this.parseDef(token)).asAst()
@@ -1032,11 +1060,11 @@ pub const Parser = struct {
                 return (try this.parseList(token)).asAst();
             },
             .LeftCurly => {
-                const block = try this.parseCommaSeparatedExpressions(.RightCurly, token);
-                _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple literal expression.");
-
-                block.kind = .Tuple;
-                return block.asAst();
+                if (try this.matchPartialCopy()) {
+                    return (try this.parsePartialTupleCopy(token)).asAst();
+                } else {
+                    return (try this.parseAnonymousTupleLiteral(token)).asAst();
+                }
             },
 
             // Operators
@@ -1250,6 +1278,24 @@ pub const Parser = struct {
 
         list.kind = .List;
         return list;
+    }
+
+    fn parsePartialTupleCopy(this: *This, token: Token) !*AstBinary {
+        const source = try this.parseExpression();
+        const semi = try this.skipExpect(.Semicolon, "Expected `;` in partial tuple copy.");
+
+        const alterations = try this.parseCommaSeparatedExpressions(.RightCurly, semi);
+        _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple literal expression.");
+
+        return try this.createNode(AstBinary, .{ .PartialCopy, token, source, alterations.asAst() });
+    }
+
+    fn parseAnonymousTupleLiteral(this: *This, token: Token) !*AstBlock {
+        const block = try this.parseCommaSeparatedExpressions(.RightCurly, token);
+        _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple literal expression.");
+
+        block.kind = .Tuple;
+        return block;
     }
 
     fn parseIdent(this: *This) std.mem.Allocator.Error!?*AstIdent {

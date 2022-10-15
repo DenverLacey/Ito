@@ -236,7 +236,8 @@ pub const Typer = struct {
             .ExclusiveRange,
             .NoneOr,
             .CaseBranch,
-            .Format => {
+            .Format,
+            .PartialCopy => {
                 const binary = node.downcast(AstBinary);
                 t_node = (try this.typecheckBinary(binary)).asAst();
             },
@@ -544,6 +545,49 @@ pub const Typer = struct {
 
                 binary.typ = .Str;
             },
+            .PartialCopy => {
+                const tuple_type = switch (t_lhs.typ.?) {
+                    .Tuple => |tuple_index| this.interp.tuple_types.items[tuple_index],
+                    else => return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "Cannot partially copy something that isn't a tuple value.", .{}),
+                };
+
+                var updated_fields = ArrayListUnmanaged([]const u8){};
+                defer updated_fields.deinit(this.allocator);
+
+                if (t_rhs.?.kind != .Comma) {
+                    return raise(error.InternalError, &this.err_msg, t_rhs.?.token.location, "rhs of partial copy not a block.", .{});
+                }
+
+                const updated_field_nodes = t_rhs.?.downcastConst(AstBlock);
+                for (updated_field_nodes.nodes) |node| {
+                    if (node.kind != .Bind) {
+                        return raise(error.TypeError, &this.err_msg, node.token.location, "Expected a named parameter for partial tuple copy.", .{});
+                    }
+
+                    const bind = node.downcastConst(AstBinary);
+
+                    if (bind.lhs.kind != .Ident) {
+                        return raise(error.TypeError, &this.err_msg, bind.lhs.token.location, "Expected a field identifier in partial tuple copy.", .{});
+                    }
+
+                    const field_ident = bind.lhs.downcastConst(AstIdent);
+                    for (updated_fields.items) |uf| {
+                        if (std.mem.eql(u8, uf, field_ident.ident)) {
+                            return raise(error.TypeError, &this.err_msg, field_ident.token.location, "`{s}` was already updated.", .{uf});
+                        }
+                    }
+
+                    try updated_fields.append(this.allocator, field_ident.ident);
+
+                    const field = tuple_type.findFieldByName(field_ident.ident) orelse return raise(error.TypeError, &this.err_msg, field_ident.token.location, "`{s}` is not a field of the type `{}`.", .{field_ident.ident, t_lhs.typ.?});
+
+                    if (!t_rhs.?.typ.?.compat(field.typ)) {
+                        return raise(error.TypeError, &this.err_msg, t_rhs.?.token.location, "Expected a `{}` value but found a `{}` value.", .{field.typ, t_rhs.?.typ.?});
+                    }
+                }
+
+                binary.typ = t_lhs.typ.?;
+            },
             else => return raise(error.InternalError, &this.err_msg, binary.token.location, "`{}` is not a binary node.", .{binary.kind}),
         }
 
@@ -776,7 +820,6 @@ pub const Typer = struct {
     fn typecheckDot(this: *This, dot: *AstBinary) !*AstBinary {
         const t_lhs = (try this.typecheckNode(dot.lhs)).?;
 
-        std.debug.print("rhs.kind = {}\n", .{dot.rhs.kind});
         std.debug.assert(dot.rhs.kind == .Ident);
         const ident = dot.rhs.downcast(AstIdent);
 

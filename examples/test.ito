@@ -1,5 +1,11 @@
-var x = 69420
-var s = $x
+type Person =
+  { name : Str
+  , age  : Int
+  }
 
-x
-s
+
+var david = { name: "David", age: 34 }
+var old_david = { david; age: david.age + 1 }
+
+david
+old_david

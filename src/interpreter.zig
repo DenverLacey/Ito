@@ -170,7 +170,6 @@ pub const Interpreter = struct {
     }
 
     pub fn findOrAddLambdaType(this: *This, parameters: []LambdaTypeDefinition.Parameter, returns: Type) !Type {
-
         var found_index: ?usize = null;
         for (this.lambda_types.items) |lambda_type, lambda_index| {
             if (!lambda_type.returns.eql(returns)) continue;

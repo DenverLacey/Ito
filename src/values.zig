@@ -283,7 +283,18 @@ pub const ListTypeDefinition = struct {
 pub const TupleTypeDefinition = struct {
     fields: []Field,
 
+    const This = @This();
+
     pub const Field = NamedParam;
+
+    pub fn findFieldByName(this: *const This, name: []const u8) ?Field {
+        for (this.fields) |field| {
+            if (std.mem.eql(u8, field.name, name)) {
+                return field;
+            }
+        }
+        return null;
+    }
 };
 
 pub const TagTypeDefinition = struct {

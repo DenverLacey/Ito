@@ -231,7 +231,8 @@ pub const Evaluator = struct {
             .Dot,
             .ExclusiveRange,
             .NoneOr,
-            .Format => {
+            .Format,
+            .PartialCopy => {
                 const binary = node.downcast(AstBinary);
                 return try this.evaluateBinary(binary);
             },
@@ -431,6 +432,7 @@ pub const Evaluator = struct {
             .ExclusiveRange => this.evaluateExclusiveRange(binary.lhs, binary.rhs),
             .NoneOr => this.evaluateNoneOr(binary.lhs, binary.rhs),
             .Format => this.evaluateFormat(binary.lhs, binary.rhs),
+            .PartialCopy => this.evaluatePartialCopy(binary.lhs, binary.rhs),
             else => raise(error.RuntimeError, &this.err_msg, binary.token.location, "Invalid binary operation", .{}),
         };
     }
@@ -841,6 +843,40 @@ pub const Evaluator = struct {
         _ = lhs;
         _ = rhs;
         todo("Implement evaluateFormat");
+    }
+
+    fn evaluatePartialCopy(this: *This, lhs: *Ast, rhs: *Ast) anyerror!Value {
+        const source_value = try this.evaluateNode(lhs);
+        const source = switch (source_value) {
+            .Tuple => |tuple| tuple,
+            else => return raise(error.InternalError, &this.err_msg, lhs.token.location, "Non-tuple value reached evaluation of partial copy node.", .{}),
+        };
+
+        var copied = Tuple{ .typ = lhs.typ.?, .fields = try source.fields.clone(this.allocator) };
+
+        if (rhs.kind != .Comma) {
+            return raise(error.InternalError, &this.err_msg, rhs.token.location, "rhs of partial copy node not a comma node and reached evaluation.", .{});
+        }
+
+        const field_nodes = rhs.downcast(AstBlock);
+        for (field_nodes.nodes) |node| {
+            if (node.kind != .Bind) {
+                return raise(error.InternalError, &this.err_msg, node.token.location, "field node in partial copy not a bind node and reached evaluation.", .{});
+            }
+
+            const bind = node.downcast(AstBinary);
+
+            if (bind.lhs.kind != .Ident) {
+                return raise(error.InternalError, &this.err_msg, bind.lhs.token.location, "field node lhs in partial copy not an ident node and reached evaluation.", .{});
+            }
+
+            const field_ident = bind.lhs.downcast(AstIdent);
+
+            try copied.fields.put(this.allocator, field_ident.ident, try this.evaluateNode(bind.rhs));
+        }
+
+        const allocated_copy = try this.gc.copyTuple(copied);
+        return Value{ .Tuple = allocated_copy };
     }
 
     fn evaluateAssign(this: *This, assign: *AstBinary) anyerror!void {
