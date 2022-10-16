@@ -6,7 +6,7 @@ const val = @import("values.zig");
 const Value = val.Value;
 const List = val.List;
 const Closure = val.Closure;
-const Tuple = val.Tuple;
+const Record = val.Record;
 const Tag = val.Tag;
 
 const DEBUG_ALWAYS_COLLECT         = false;
@@ -26,13 +26,20 @@ fn debugReportGcInfo() void {
         std.debug.print("::: No. Deallocations:  {}\n", .{debug_num_deallocations});
 }
 
+fn GCValue(comptime T: type) type {
+    return struct {
+        marked: bool,
+        value: T,
+    };
+}
+
 pub const GarbageCollector = struct {
     allocator: Allocator,
 
     strings: ArrayListUnmanaged(GCValue([]const u8)),
     lists: ArrayListUnmanaged(GCValue(*List)),
     closures: ArrayListUnmanaged(GCValue(*Closure)),
-    tuples: ArrayListUnmanaged(GCValue(*Tuple)),
+    records: ArrayListUnmanaged(GCValue(*Record)),
     tags: ArrayListUnmanaged(GCValue(*Tag)),
 
     const This = @This();
@@ -44,7 +51,7 @@ pub const GarbageCollector = struct {
             .strings = ArrayListUnmanaged(GCValue([]const u8)){},
             .lists = ArrayListUnmanaged(GCValue(*List)){},
             .closures = ArrayListUnmanaged(GCValue(*Closure)){},
-            .tuples = ArrayListUnmanaged(GCValue(*Tuple)){},
+            .records = ArrayListUnmanaged(GCValue(*Record)){},
             .tags = ArrayListUnmanaged(GCValue(*Tag)){},
         };
     }
@@ -69,11 +76,11 @@ pub const GarbageCollector = struct {
         // }
         this.closures.deinit(this.allocator);
 
-        for (this.tuples.items) |tuple| {
-            tuple.value.deinit(this.allocator);
-            this.allocator.destroy(tuple.value);
+        for (this.records.items) |record| {
+            record.value.deinit(this.allocator);
+            this.allocator.destroy(record.value);
         }
-        this.tuples.deinit(this.allocator);
+        this.records.deinit(this.allocator);
 
         for (this.tags.items) |tag| {
             tag.value.deinit(this.allocator);
@@ -119,16 +126,16 @@ pub const GarbageCollector = struct {
         return allocated;
     }
 
-    pub fn copyTuple(this: *This, tuple: Tuple) !*Tuple {
-        const allocated = try this.allocator.create(Tuple);
-        allocated.* = tuple;
+    pub fn copyRecord(this: *This, record: Record) !*Record {
+        const allocated = try this.allocator.create(Record);
+        allocated.* = record;
 
         if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING {}\n", .{allocated});
             debug_num_allocations += 1;
         }
 
-        try this.tuples.append(this.allocator, GCValue(*Tuple){ .marked = false, .value = allocated });
+        try this.records.append(this.allocator, GCValue(*Record){ .marked = false, .value = allocated });
         return allocated;
     }
 
@@ -165,7 +172,7 @@ pub const GarbageCollector = struct {
             this.strings.items.len +
             this.lists.items.len +
             this.closures.items.len +
-            this.tuples.items.len +
+            this.records.items.len +
             this.tags.items.len;
 
         if (DEBUG_LOG_NUM_COLLECTIONS)
@@ -211,7 +218,7 @@ pub const GarbageCollector = struct {
                     }
                 }
             },
-            .Tuple => |value| {
+            .Record => |value| {
                 this.markVariables(value.fields.values());
             },
             .Tag => |value| {
@@ -229,7 +236,7 @@ pub const GarbageCollector = struct {
         this.freeUnmarkedStrings(&this.strings);
         this.freeUnmarkedValuesInList(*List, &this.lists);
         this.freeUnmarkedValuesInList(*Closure, &this.closures);
-        this.freeUnmarkedValuesInList(*Tuple, &this.tuples);
+        this.freeUnmarkedValuesInList(*Record, &this.records);
         this.freeUnmarkedValuesInList(*Tag, &this.tags);
     }
 
@@ -279,10 +286,3 @@ pub const GarbageCollector = struct {
         }
     }
 };
-
-fn GCValue(comptime T: type) type {
-    return struct {
-        marked: bool,
-        value: T,
-    };
-}

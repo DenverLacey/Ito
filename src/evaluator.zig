@@ -44,7 +44,7 @@ const todo = errors.todo;
 const values = @import("values.zig");
 const Type = values.Type;
 const TypeDefinition = values.TypeDefinition;
-const TupleTypeDefinition = values.TupleTypeDefinition;
+const RecordTypeDefinition = values.RecordTypeDefinition;
 const TagTypeDefinition = values.TagTypeDefinition;
 const UnionTypeDefinition = values.UnionTypeDefinition;
 const LambdaTypeDefinition = values.LambdaTypeDefinition;
@@ -54,7 +54,7 @@ const Char = values.Char;
 const Range = values.Range;
 const List = values.List;
 const Closure = values.Closure;
-const Tuple = values.Tuple;
+const Record = values.Record;
 const Tag = values.Tag;
 
 const GarbageCollector = @import("gc.zig").GarbageCollector;
@@ -259,9 +259,9 @@ pub const Evaluator = struct {
                 const list = node.downcast(AstBlock);
                 return try this.evaluateList(list);
             },
-            .Tuple => {
-                const tuple = node.downcast(AstBlock);
-                return try this.evaluateTupleLiteral(tuple);
+            .Record => {
+                const record = node.downcast(AstBlock);
+                return try this.evaluateRecordLiteral(record);
             },
 
             .If => {
@@ -711,9 +711,9 @@ pub const Evaluator = struct {
         args: *AstBlock,
     ) anyerror!Value {
         switch (typ) {
-            .Tuple => |tuple_index| {
-                const tuple_type = this.interp.tuple_types.items[tuple_index];
-                return this.evaluateCallTupleType(typ, tuple_type, args);
+            .Record => |record_index| {
+                const record_type = this.interp.record_types.items[record_index];
+                return this.evaluateCallRecordType(typ, record_type, args);
             },
             .Tag => |tag_index| {
                 const tag_type = this.interp.tag_types.items[tag_index];
@@ -723,7 +723,7 @@ pub const Evaluator = struct {
         }
     }
 
-    fn evaluateCallTupleType(this: *This, typ: Type, defn: TupleTypeDefinition, args: *AstBlock) anyerror!Value {
+    fn evaluateCallRecordType(this: *This, typ: Type, defn: RecordTypeDefinition, args: *AstBlock) anyerror!Value {
         if (args.nodes.len != defn.fields.len) {
             return raise(error.RuntimeError, &this.err_msg, args.token.location, "Incorrect number of arguments! Expected {} but found {}.", .{ defn.fields.len, args.nodes.len });
         }
@@ -735,9 +735,9 @@ pub const Evaluator = struct {
             try fields.putNoClobber(this.allocator, field.name, field_value);
         }
 
-        const tuple_value = Tuple{ .typ = typ, .fields = fields };
-        const allocated_tuple = try this.gc.copyTuple(tuple_value);
-        return Value{ .Tuple = allocated_tuple };
+        const record_value = Record{ .typ = typ, .fields = fields };
+        const allocated_record = try this.gc.copyRecord(record_value);
+        return Value{ .Record = allocated_record };
     }
 
     fn evaluateCallTagType(this: *This, typ: Type, defn: TagTypeDefinition, args: *AstBlock) anyerror!Value {
@@ -754,7 +754,7 @@ pub const Evaluator = struct {
         return switch (instance_value) {
             .List => |list| this.evaluateDotList(list, field_ident_node),
             .Type => |_type| this.evaluateDotType(_type, field_ident_node),
-            .Tuple => |tuple| this.evaluateDotTuple(tuple, field_ident_node),
+            .Record => |record| this.evaluateDotRecord(record, field_ident_node),
             else => raise(error.RuntimeError, &this.err_msg, instance_node.token.location, "`.` requires its first operand to be an instance of a struct.", .{}),
         };
     }
@@ -771,7 +771,7 @@ pub const Evaluator = struct {
 
     fn evaluateDotType(this: *This, typ: Type, field_idenet_node: *AstIdent) anyerror!Value {
         const defn = switch (typ) {
-            .Tuple => |tuple_index| this.interp.tuple_types.items[tuple_index],
+            .Record => |record_index| this.interp.record_types.items[record_index],
             else => unreachable,
         };
 
@@ -791,14 +791,14 @@ pub const Evaluator = struct {
         // }
     }
 
-    fn evaluateDotTuple(
+    fn evaluateDotRecord(
         this: *This,
-        tuple: *Tuple,
+        record: *Record,
         field_ident_node: *AstIdent,
     ) anyerror!Value {
         const ident = field_ident_node.ident;
 
-        if (tuple.fields.getPtr(ident)) |field_ptr| {
+        if (record.fields.getPtr(ident)) |field_ptr| {
             return field_ptr.*;
         } 
         // else if (instance._struct.methods.get(ident)) |method| {
@@ -808,7 +808,7 @@ pub const Evaluator = struct {
         //     return Value{ .Closure = allocated_bound_closure };
         // } 
         else {
-            return raise(error.RuntimeError, &this.err_msg, field_ident_node.token.location, "Tuple does not have a field with this name.", .{});
+            return raise(error.RuntimeError, &this.err_msg, field_ident_node.token.location, "Record does not have a field with this name.", .{});
         }
     }
 
@@ -848,11 +848,11 @@ pub const Evaluator = struct {
     fn evaluatePartialCopy(this: *This, lhs: *Ast, rhs: *Ast) anyerror!Value {
         const source_value = try this.evaluateNode(lhs);
         const source = switch (source_value) {
-            .Tuple => |tuple| tuple,
-            else => return raise(error.InternalError, &this.err_msg, lhs.token.location, "Non-tuple value reached evaluation of partial copy node.", .{}),
+            .Record => |record| record,
+            else => return raise(error.InternalError, &this.err_msg, lhs.token.location, "Non-record value reached evaluation of partial copy node.", .{}),
         };
 
-        var copied = Tuple{ .typ = lhs.typ.?, .fields = try source.fields.clone(this.allocator) };
+        var copied = Record{ .typ = lhs.typ.?, .fields = try source.fields.clone(this.allocator) };
 
         if (rhs.kind != .Comma) {
             return raise(error.InternalError, &this.err_msg, rhs.token.location, "rhs of partial copy node not a comma node and reached evaluation.", .{});
@@ -875,8 +875,8 @@ pub const Evaluator = struct {
             try copied.fields.put(this.allocator, field_ident.ident, try this.evaluateNode(bind.rhs));
         }
 
-        const allocated_copy = try this.gc.copyTuple(copied);
-        return Value{ .Tuple = allocated_copy };
+        const allocated_copy = try this.gc.copyRecord(copied);
+        return Value{ .Record = allocated_copy };
     }
 
     fn evaluateAssign(this: *This, assign: *AstBinary) anyerror!void {
@@ -909,22 +909,22 @@ pub const Evaluator = struct {
     }
 
     fn evaluateAssignDot(this: *This, target: *AstBinary, expr: *Ast) anyerror!void {
-        const tuple = try this.evaluateNode(target.lhs);
+        const record = try this.evaluateNode(target.lhs);
 
-        switch (tuple) {
-            .Tuple => |tp| try this.evaluateAssignDotTuple(tp, target.rhs.downcast(AstIdent), expr),
-            else => return raise(error.RuntimeError, &this.err_msg, target.lhs.token.location, "`.` requires its first operand to be a tuple value.", .{}),
+        switch (record) {
+            .Record => |tp| try this.evaluateAssignDotRecord(tp, target.rhs.downcast(AstIdent), expr),
+            else => return raise(error.RuntimeError, &this.err_msg, target.lhs.token.location, "`.` requires its first operand to be a record value.", .{}),
         }
     }
 
-    fn evaluateAssignDotTuple(
+    fn evaluateAssignDotRecord(
         this: *This,
-        tuple: *Tuple,
+        record: *Record,
         field_ident_node: *AstIdent,
         expr: *Ast,
     ) anyerror!void {
         const field_ident = field_ident_node.ident;
-        var field_ptr = tuple.fields.getPtr(field_ident) orelse return raise(error.RuntimeError, &this.err_msg, field_ident_node.token.location, "Tuple does not have a field with this name.", .{});
+        var field_ptr = record.fields.getPtr(field_ident) orelse return raise(error.RuntimeError, &this.err_msg, field_ident_node.token.location, "Record does not have a field with this name.", .{});
 
         field_ptr.* = try this.evaluateNode(expr);
     }
@@ -970,14 +970,14 @@ pub const Evaluator = struct {
         return Value{ .List = items };
     }
 
-    fn evaluateTupleLiteral(this: *This, tuple: *AstBlock) anyerror!Value {
-        const tuple_index = switch (tuple.typ.?) {
-            .Tuple => |ti| ti,
+    fn evaluateRecordLiteral(this: *This, record: *AstBlock) anyerror!Value {
+        const record_index = switch (record.typ.?) {
+            .Record => |ti| ti,
             else => unreachable,
         };
 
-        const tuple_type = this.interp.tuple_types.items[tuple_index];
-        return try this.evaluateCallTupleType(tuple.typ.?, tuple_type, tuple);
+        const record_type = this.interp.record_types.items[record_index];
+        return try this.evaluateCallRecordType(record.typ.?, record_type, record);
     }
 
     fn evaluateIf(this: *This, _if: *AstIf) anyerror!Value {

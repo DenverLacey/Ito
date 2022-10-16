@@ -46,7 +46,7 @@ const values = @import("values.zig");
 const Type = values.Type;
 const NamedParam = values.NamedParam;
 const TypeDefinition = values.TypeDefinition;
-const TupleTypeDefinition = values.TupleTypeDefinition;
+const RecordTypeDefinition = values.RecordTypeDefinition;
 const TagTypeDefinition = values.TagTypeDefinition;
 const UnionTypeDefinition = values.UnionTypeDefinition;
 const LambdaTypeDefinition = values.LambdaTypeDefinition;
@@ -256,9 +256,9 @@ pub const Typer = struct {
                 const list = node.downcast(AstBlock);
                 t_node = (try this.typecheckList(list)).asAst();
             },
-            .Tuple => {
-                const tuple = node.downcast(AstBlock);
-                t_node = (try this.typecheckTupleLiteral(tuple)).asAst();
+            .Record => {
+                const record = node.downcast(AstBlock);
+                t_node = (try this.typecheckRecordLiteral(record)).asAst();
             },
 
             .If => {
@@ -546,9 +546,9 @@ pub const Typer = struct {
                 binary.typ = .Str;
             },
             .PartialCopy => {
-                const tuple_type = switch (t_lhs.typ.?) {
-                    .Tuple => |tuple_index| this.interp.tuple_types.items[tuple_index],
-                    else => return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "Cannot partially copy something that isn't a tuple value.", .{}),
+                const record_type = switch (t_lhs.typ.?) {
+                    .Record => |record_index| this.interp.record_types.items[record_index],
+                    else => return raise(error.TypeError, &this.err_msg, t_lhs.token.location, "Cannot partially copy something that isn't a record value.", .{}),
                 };
 
                 var updated_fields = ArrayListUnmanaged([]const u8){};
@@ -561,13 +561,13 @@ pub const Typer = struct {
                 const updated_field_nodes = t_rhs.?.downcastConst(AstBlock);
                 for (updated_field_nodes.nodes) |node| {
                     if (node.kind != .Bind) {
-                        return raise(error.TypeError, &this.err_msg, node.token.location, "Expected a named parameter for partial tuple copy.", .{});
+                        return raise(error.TypeError, &this.err_msg, node.token.location, "Expected a named parameter for partial record copy.", .{});
                     }
 
                     const bind = node.downcastConst(AstBinary);
 
                     if (bind.lhs.kind != .Ident) {
-                        return raise(error.TypeError, &this.err_msg, bind.lhs.token.location, "Expected a field identifier in partial tuple copy.", .{});
+                        return raise(error.TypeError, &this.err_msg, bind.lhs.token.location, "Expected a field identifier in partial record copy.", .{});
                     }
 
                     const field_ident = bind.lhs.downcastConst(AstIdent);
@@ -579,7 +579,7 @@ pub const Typer = struct {
 
                     try updated_fields.append(this.allocator, field_ident.ident);
 
-                    const field = tuple_type.findFieldByName(field_ident.ident) orelse return raise(error.TypeError, &this.err_msg, field_ident.token.location, "`{s}` is not a field of the type `{}`.", .{field_ident.ident, t_lhs.typ.?});
+                    const field = record_type.findFieldByName(field_ident.ident) orelse return raise(error.TypeError, &this.err_msg, field_ident.token.location, "`{s}` is not a field of the type `{}`.", .{field_ident.ident, t_lhs.typ.?});
 
                     if (!t_rhs.?.typ.?.compat(field.typ)) {
                         return raise(error.TypeError, &this.err_msg, t_rhs.?.token.location, "Expected a `{}` value but found a `{}` value.", .{field.typ, t_rhs.?.typ.?});
@@ -688,11 +688,11 @@ pub const Typer = struct {
         return list;
     }
 
-    fn typecheckTupleLiteral(this: *This, tuple: *AstBlock) anyerror!*AstBlock {
-        var fields = ArrayListUnmanaged(TupleTypeDefinition.Field){};
+    fn typecheckRecordLiteral(this: *This, record: *AstBlock) anyerror!*AstBlock {
+        var fields = ArrayListUnmanaged(RecordTypeDefinition.Field){};
         errdefer fields.deinit(this.allocator);
 
-        for (tuple.nodes) |*node| {
+        for (record.nodes) |*node| {
             if (node.*.kind != .Bind) {
                 return raise(error.TypeError, &this.err_msg, node.*.token.location, "Expecting a binding.", .{});
             }
@@ -706,8 +706,8 @@ pub const Typer = struct {
             node.* = t_rhs;
         }
 
-        tuple.typ = try this.interp.findOrAddTupleType(fields.items);
-        return tuple;
+        record.typ = try this.interp.findOrAddRecordType(fields.items);
+        return record;
     }
 
     fn typecheckCall(this: *This, call: *AstBinary, lhs: *Ast, rhs: *Ast) !void {
@@ -718,15 +718,15 @@ pub const Typer = struct {
         }
 
         switch (typ) {
-            .Tuple => |tuple_index| {
-                const tuple_type = this.interp.tuple_types.items[tuple_index];
+            .Record => |record_index| {
+                const record_type = this.interp.record_types.items[record_index];
                 
                 std.debug.assert(rhs.kind == .Comma);
                 const args = rhs.downcast(AstBlock);
 
-                try this.typecheckCallArguments(tuple_type.fields, args);
+                try this.typecheckCallArguments(record_type.fields, args);
                 
-                call.typ = Type{ .Tuple = tuple_index };
+                call.typ = Type{ .Record = record_index };
             } ,
             .Tag => |_| todo("Implement typecheck for calling tag types."),
             .Lambda => |lambda_index| {
@@ -824,12 +824,12 @@ pub const Typer = struct {
         const ident = dot.rhs.downcast(AstIdent);
 
         switch (t_lhs.typ.?) {
-            .Tuple => |tuple_index| {
-                const tuple_type = this.interp.tuple_types.items[tuple_index];
+            .Record => |record_index| {
+                const record_type = this.interp.record_types.items[record_index];
 
                 // find index of field
                 var field_index: ?usize = null;
-                for (tuple_type.fields) |field, i| {
+                for (record_type.fields) |field, i| {
                     if (std.mem.eql(u8, field.name, ident.ident)) {
                         field_index = i;
                         break;
@@ -838,13 +838,13 @@ pub const Typer = struct {
 
                 if (field_index) |idx| {
                     dot.lhs = t_lhs;
-                    dot.typ = tuple_type.fields[idx].typ;
+                    dot.typ = record_type.fields[idx].typ;
                     return dot;
                 }
             },
             .Tag => |tag_index| {
                 _ = tag_index;
-                todo("Implement typechecking dot for tuples.");
+                todo("Implement typechecking dot for records.");
             },
             else => {},
         }
@@ -1150,22 +1150,22 @@ pub const Typer = struct {
                     return raise(error.TypeError, &this.err_msg, sig.token.location, "Undeclared identifier `{s}`.", .{type_name});
                 }
             },
-            .Tuple => |tuple_data| {
-                std.debug.assert(tuple_data.field_names.len == tuple_data.field_types.len);
+            .Record => |record_data| {
+                std.debug.assert(record_data.field_names.len == record_data.field_types.len);
 
-                const fields = try this.allocator.alloc(TupleTypeDefinition.Field, tuple_data.field_names.len);
+                const fields = try this.allocator.alloc(RecordTypeDefinition.Field, record_data.field_names.len);
                 var i: usize = 0;
-                while (i < tuple_data.field_names.len) : (i += 1) {
-                    const field_name = tuple_data.field_names[i];
-                    const field_type: Type = if (tuple_data.field_types[i]) |ft| 
+                while (i < record_data.field_names.len) : (i += 1) {
+                    const field_name = record_data.field_names[i];
+                    const field_type: Type = if (record_data.field_types[i]) |ft| 
                         try this.typecheckTypeSignature(ft)
                     else
                         Type.Any;
 
-                    fields[i] = TupleTypeDefinition.Field{ .name = field_name.ident, .typ = field_type };
+                    fields[i] = RecordTypeDefinition.Field{ .name = field_name.ident, .typ = field_type };
                 }
 
-                typ = try this.interp.findOrAddTupleType(fields);
+                typ = try this.interp.findOrAddRecordType(fields);
             },
             .Tag => |tag_data| {
                 const variants = try this.allocator.alloc(TagTypeDefinition.Variant, tag_data.tag_names.len);

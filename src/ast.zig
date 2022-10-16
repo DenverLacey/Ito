@@ -61,7 +61,7 @@ pub const Ast = struct {
             .PartialCopy => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
-            .Block, .Comma, .List, .Tuple => try writer.print("{}", .{this.downcastConst(AstBlock)}),
+            .Block, .Comma, .List, .Record => try writer.print("{}", .{this.downcastConst(AstBlock)}),
 
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
@@ -127,7 +127,7 @@ pub const AstKind = enum {
     Block,
     Comma,
     List,
-    Tuple,
+    Record,
 
     If,
     While,
@@ -576,13 +576,13 @@ pub const AstTypeSignature = struct {
 
     pub const Data = union(enum) {
         Name: []const u8,
-        Tuple: TupleData,
+        Record: RecordData,
         Tag: TagData,
         Union: UnionData,
         Optional: *AstTypeSignature,
     };
 
-    pub const TupleData = struct {
+    pub const RecordData = struct {
         field_names: []*AstIdent,
         field_types: []?*AstTypeSignature,
     };

@@ -27,7 +27,7 @@ pub const Type = union(enum) {
     // RangeChar,
     RangeInt,
     List: u32,
-    Tuple: u32,
+    Record: u32,
     Tag: u32,
     Union: u32,
     Lambda: u32,
@@ -80,8 +80,8 @@ pub const Type = union(enum) {
                 .List => |other_index| return this_index == other_index,
                 else => return false,
             },
-            .Tuple => |this_index| switch (other) {
-                .Tuple => |other_index| return this_index == other_index,
+            .Record => |this_index| switch (other) {
+                .Record => |other_index| return this_index == other_index,
                 else => return false,
             },
             .Tag => |this_index| switch (other) {
@@ -157,9 +157,9 @@ pub const Type = union(enum) {
                 .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
-            .Tuple => |index| switch (with) {
+            .Record => |index| switch (with) {
                 .Any => return true,
-                .Tuple => |with_index| return index == with_index,
+                .Record => |with_index| return index == with_index,
                 .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
@@ -212,13 +212,13 @@ pub const Type = union(enum) {
                 const list_type = interp.list_types.items[index];
                 try writer.print("List[{}]", .{list_type.item_type});
             },
-            .Tuple => |index| {
-                const tuple_type = interp.tuple_types.items[index];
+            .Record => |index| {
+                const record_type = interp.record_types.items[index];
 
                 _ = try writer.write("{ ");
-                for (tuple_type.fields) |field, i| {
+                for (record_type.fields) |field, i| {
                     try writer.print("{s} : {}", .{field.name, field.typ});
-                    if (i < tuple_type.fields.len - 1) {
+                    if (i < record_type.fields.len - 1) {
                         _ = try writer.write(", ");
                     }
                 }
@@ -280,7 +280,7 @@ pub const ListTypeDefinition = struct {
     item_type: Type,
 };
 
-pub const TupleTypeDefinition = struct {
+pub const RecordTypeDefinition = struct {
     fields: []Field,
 
     const This = @This();
@@ -349,7 +349,7 @@ pub const Value = union(ValueKind) {
     List: *List,
     Closure: *Closure,
     Type: Type,
-    Tuple: *Tuple,
+    Record: *Record,
     Tag: *Tag,
 
     const This = @This();
@@ -366,7 +366,7 @@ pub const Value = union(ValueKind) {
             .List => |value| value.items.len != 0,
             .Closure => true,
             .Type => true,
-            .Tuple => true,
+            .Record => true,
             .Tag => true,
         };
     }
@@ -426,8 +426,8 @@ pub const Value = union(ValueKind) {
                 .Type => |other_typ| typ.eql(other_typ),
                 else => false,
             },
-            .Tuple => |value| switch (other) {
-                .Tuple => |other_value| blk: {
+            .Record => |value| switch (other) {
+                .Record => |other_value| blk: {
                     if (!value.typ.eql(other_value.typ))
                         break :blk false;
                     
@@ -498,7 +498,7 @@ pub const Value = union(ValueKind) {
             .Type => |value| {
                 try writer.print("{}", .{value});
             },
-            .Tuple => |value| {
+            .Record => |value| {
                 try writer.print("{}", .{value});
             },
             .Tag => |value| {
@@ -519,7 +519,7 @@ pub const ValueKind = enum {
     List,
     Closure,
     Type,
-    Tuple,
+    Record,
     Tag,
 };
 
@@ -622,7 +622,7 @@ pub const Closure = struct {
     }
 };
 
-pub const Tuple = struct {
+pub const Record = struct {
     typ: Type,
     fields: StringArrayHashMapUnmanaged(Value),
 
@@ -676,7 +676,7 @@ pub const Tag = struct {
 // const values = @import("values.zig");
 // const Type = values.Type;
 // const TypeDefinition = values.TypeDefinition;
-// const TupleTypeDefinition = values.TupleTypeDefinition;
+// const RecordTypeDefinition = values.RecordTypeDefinition;
 // const TagTypeDefinition = values.TagTypeDefinition;
 // const UnionTypeDefinition = values.UnionTypeDefinition;
 // const LambdaTypeDefinition = values.LambdaTypeDefinition;
@@ -686,5 +686,5 @@ pub const Tag = struct {
 // const Range = values.Range;
 // const List = values.List;
 // const Closure = values.Closure;
-// const Tuple = values.Tuple;
+// const Record = values.Record;
 // const Tag = values.Tag;

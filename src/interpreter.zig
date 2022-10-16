@@ -16,7 +16,7 @@ const Evaluator = @import("evaluator.zig").Evaluator;
 const values = @import("values.zig");
 const Type = values.Type;
 const ListTypeDefinition = values.ListTypeDefinition;
-const TupleTypeDefinition = values.TupleTypeDefinition;
+const RecordTypeDefinition = values.RecordTypeDefinition;
 const TagTypeDefinition = values.TagTypeDefinition;
 const UnionTypeDefinition = values.UnionTypeDefinition;
 const LambdaTypeDefinition = values.LambdaTypeDefinition;
@@ -46,7 +46,7 @@ pub const Interpreter = struct {
 
     // Composite Types
     list_types: ArrayListUnmanaged(ListTypeDefinition) = .{},
-    tuple_types: ArrayListUnmanaged(TupleTypeDefinition) = .{},
+    record_types: ArrayListUnmanaged(RecordTypeDefinition) = .{},
     tag_types: ArrayListUnmanaged(TagTypeDefinition) = .{},
     union_types: ArrayListUnmanaged(UnionTypeDefinition) = .{},
     lambda_types: ArrayListUnmanaged(LambdaTypeDefinition) = .{},
@@ -101,14 +101,14 @@ pub const Interpreter = struct {
         return Type{ .List = typ.? };
     }
 
-    pub fn findOrAddTupleType(this: *This, fields: []TupleTypeDefinition.Field) !Type {
+    pub fn findOrAddRecordType(this: *This, fields: []RecordTypeDefinition.Field) !Type {
         var typ: ?u32 = null;
-        for (this.tuple_types.items) |tuple_type, tuple_index| {
-            if (fields.len != tuple_type.fields.len) continue;
+        for (this.record_types.items) |record_type, record_index| {
+            if (fields.len != record_type.fields.len) continue;
 
             var matches: usize = 0;
             for (fields) |needle| {
-                for (tuple_type.fields) |field| {
+                for (record_type.fields) |field| {
                     if (std.mem.eql(u8, needle.name, field.name)) {
                         // @TODO: Check field types
                         matches += 1;
@@ -118,21 +118,21 @@ pub const Interpreter = struct {
             }
 
             if (matches == fields.len) {
-                typ = @intCast(u32, tuple_index);
+                typ = @intCast(u32, record_index);
                 break;
             }
         }
 
         if (typ == null) {
-            const tuple_def = TupleTypeDefinition{ .fields = fields };
+            const record_def = RecordTypeDefinition{ .fields = fields };
 
-            try this.tuple_types.append(this.allocator, tuple_def);            
-            typ = @intCast(u32, this.tuple_types.items.len - 1);
+            try this.record_types.append(this.allocator, record_def);            
+            typ = @intCast(u32, this.record_types.items.len - 1);
         } else {
             this.allocator.free(fields);
         }
 
-        return Type{ .Tuple = typ.? };
+        return Type{ .Record = typ.? };
     }
 
     pub fn findOrAddTagType(this: *This, variants: []TagTypeDefinition.Variant) !Type {

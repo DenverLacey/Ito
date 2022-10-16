@@ -31,7 +31,7 @@ const AstVar = ast.AstVar;
 const AstTypeBlock = ast.AstTypeBlock;
 const AstType = ast.AstType;
 const AstTypeSignature = ast.AstTypeSignature;
-const AstTupleLiteral = ast.AstTupleLiteral;
+const AstRecordLiteral = ast.AstRecordLiteral;
 
 const zg = @import("ziglyph");
 
@@ -1061,9 +1061,9 @@ pub const Parser = struct {
             },
             .LeftCurly => {
                 if (try this.matchPartialCopy()) {
-                    return (try this.parsePartialTupleCopy(token)).asAst();
+                    return (try this.parsePartialRecordCopy(token)).asAst();
                 } else {
-                    return (try this.parseAnonymousTupleLiteral(token)).asAst();
+                    return (try this.parseAnonymousRecordLiteral(token)).asAst();
                 }
             },
 
@@ -1183,7 +1183,7 @@ pub const Parser = struct {
                 _ = try this.expect(.RightCurly, "Expected `}}` to terminate call operator.");
 
                 // @TODO:
-                // Actually differentiate between calls with ()'s and typed tuple literals with {}'s
+                // Actually differentiate between calls with ()'s and typed record literals with {}'s
                 //
                 const call = try this.createNode(AstBinary, .{ .Call, token, previous, args.asAst() });
                 return call.asAst();
@@ -1280,21 +1280,21 @@ pub const Parser = struct {
         return list;
     }
 
-    fn parsePartialTupleCopy(this: *This, token: Token) !*AstBinary {
+    fn parsePartialRecordCopy(this: *This, token: Token) !*AstBinary {
         const source = try this.parseExpression();
-        const semi = try this.skipExpect(.Semicolon, "Expected `;` in partial tuple copy.");
+        const semi = try this.skipExpect(.Semicolon, "Expected `;` in partial record copy.");
 
         const alterations = try this.parseCommaSeparatedExpressions(.RightCurly, semi);
-        _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple literal expression.");
+        _ = try this.expect(.RightCurly, "Expected `}}` to terminate record literal expression.");
 
         return try this.createNode(AstBinary, .{ .PartialCopy, token, source, alterations.asAst() });
     }
 
-    fn parseAnonymousTupleLiteral(this: *This, token: Token) !*AstBlock {
+    fn parseAnonymousRecordLiteral(this: *This, token: Token) !*AstBlock {
         const block = try this.parseCommaSeparatedExpressions(.RightCurly, token);
-        _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple literal expression.");
+        _ = try this.expect(.RightCurly, "Expected `}}` to terminate record literal expression.");
 
-        block.kind = .Tuple;
+        block.kind = .Record;
         return block;
     }
 
@@ -1594,7 +1594,7 @@ pub const Parser = struct {
             sig = try this.allocator.create(AstTypeSignature);
             sig.* = AstTypeSignature.init(none, AstTypeSignature.Data{ .Name = "None" });
         } else if (try this.match(.LeftCurly)) |paren| {
-            sig = try this.parseTupleTypeSignature(paren);
+            sig = try this.parseRecordTypeSignature(paren);
         } else if (try this.match(.LeftSquare)) |square| {
             sig = try this.parseTagTypeSignature(square);
         } else if (try this.match(.QuestionMark)) |qmark| {
@@ -1612,7 +1612,7 @@ pub const Parser = struct {
         return sig;
     }
 
-    fn parseTupleTypeSignature(this: *This, token: Token) !*AstTypeSignature {
+    fn parseRecordTypeSignature(this: *This, token: Token) !*AstTypeSignature {
         var field_names = ArrayListUnmanaged(*AstIdent){};
         var field_types = ArrayListUnmanaged(?*AstTypeSignature){};
 
@@ -1622,7 +1622,7 @@ pub const Parser = struct {
                 break;
             }
 
-            const name = (try this.parseIdent()) orelse return raise(error.ParseError,  &this.err_msg, this.tokenizer.currentLocation(), "Expected field name in tuple type signature.", .{});
+            const name = (try this.parseIdent()) orelse return raise(error.ParseError,  &this.err_msg, this.tokenizer.currentLocation(), "Expected field name in record type signature.", .{});
             try field_names.append(this.allocator, name);
 
             if ((try this.match(.Colon)) != null) {
@@ -1642,10 +1642,10 @@ pub const Parser = struct {
             }
         }
 
-        _ = try this.expect(.RightCurly, "Expected `}}` to terminate tuple type signature.");
+        _ = try this.expect(.RightCurly, "Expected `}}` to terminate record type signature.");
 
         var node = try this.allocator.create(AstTypeSignature);
-        node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Tuple = .{ .field_names = field_names.items, .field_types = field_types.items } });
+        node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Record = .{ .field_names = field_names.items, .field_types = field_types.items } });
         return node;
     }
 
@@ -1671,7 +1671,7 @@ pub const Parser = struct {
             }
         }
 
-        _ = try this.expect(.RightSquare, "Expected `]` to terminate tuple type signature.");
+        _ = try this.expect(.RightSquare, "Expected `]` to terminate record type signature.");
 
         var node = try this.allocator.create(AstTypeSignature);
         node.* = AstTypeSignature.init(token, AstTypeSignature.Data{ .Tag = .{ .tag_names = tag_names.items } });
