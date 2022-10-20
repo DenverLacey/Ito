@@ -1,11 +1,38 @@
-type Person =
-  { name : Str
-  , age  : Int
-  }
+type Dir = [Up, Down, Left, Right]
+
+# def flip_direction(d: Dir) -> Dir =
+#   case d
+#     Up -> Down
+#     Down -> Up
+#     Left -> Right
+#     Right -> Left
+#     else -> d
+
+var direction = Up
+direction
+
+direction = Down
+direction
+
+# var flipped = flip_direction(direction)
+# flipped
 
 
-var david = { name: "David", age: 34 }
-var old_david = { david; age: david.age + 1 }
+# We shouldn't need to have the else branch but the typecehcker isn't smart enough yet
+def shout_direction(dir: Dir) -> Str =
+  case dir
+    Up -> "UP!"
+    Down -> "DOWN!"
+    Left -> "LEFT!"
+    Right -> "RIGHT!"
+    else -> "Invalid direction"
 
-david
-old_david
+
+var shouted = shout_direction(direction)
+shouted
+
+# This doesn't typecehck because Diagonal is not apart of the Dir tag set
+# direction = Diagonal
+# direction
+# shouted = shout_direction(direction)
+# shouted

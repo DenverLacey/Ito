@@ -329,7 +329,9 @@ pub const Evaluator = struct {
                 return Value{ .Type = get.typ_of };
             },
             .GetTag => {
-                todo("Implement evaluation of GetTag nodes");
+                const get = node.downcast(AstGetTag);
+                const allocated = try this.gc.copyTag(Tag{ .tag = get.tag_name });
+                return Value{ .Tag = allocated };
             },
         }
     }
@@ -884,7 +886,10 @@ pub const Evaluator = struct {
             .GetGlobal, .GetVar => try this.evaluateAssignVariable(assign.lhs.downcast(AstGetVar), assign.rhs),
             .Index => try this.evaluateAssignIndex(assign.lhs.downcast(AstBinary), assign.rhs),
             .Dot => try this.evaluateAssignDot(assign.lhs.downcast(AstBinary), assign.rhs),
-            else => return raise(error.RuntimeError, &this.err_msg, assign.lhs.token.location, "Cannot assign to this kind of expression!", .{}),
+            else => {
+                std.debug.print("{}", .{assign.lhs.kind});
+                return raise(error.RuntimeError, &this.err_msg, assign.lhs.token.location, "Cannot assign to this kind of expression!", .{});
+            },
         }
     }
 

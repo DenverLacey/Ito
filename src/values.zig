@@ -165,7 +165,8 @@ pub const Type = union(enum) {
             },
             .Tag => |index| switch (with) {
                 .Any => return true,
-                .Tag => |with_index| return index == with_index,
+                // .Tag => |with_index| return index == with_index,
+                .Tag => |with_index| return compatWithTagSet(index, with_index),
                 .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
@@ -186,6 +187,14 @@ pub const Type = union(enum) {
                 else => return false,
             },
         }
+    }
+
+    fn compatWithTagSet(this_index: u32, tag_index: u32) bool {
+        const interp = Interpreter.get();
+        const this_tag = interp.tag_types.items[this_index];
+        const with_tag = interp.tag_types.items[tag_index];
+        const superset = with_tag.isSuperset(this_tag);
+        return superset;
     }
 
     fn compatWithUnion(this: This, union_index: u32) bool {
@@ -300,10 +309,35 @@ pub const RecordTypeDefinition = struct {
 pub const TagTypeDefinition = struct {
     variants: []Variant,
 
+    const This = @This();
+
     pub const Variant = struct {
         name: []const u8,
         // @TODO: Add payload stuff
     };
+
+    pub fn isSuperset(this: *const This, other: This) bool {
+        var superset = true;
+        for (other.variants) |other_variant| {
+            // var found = false;
+            for (this.variants) |variant| {
+                if (&variant.name[0] == &other_variant.name[0]) {
+                    // @TODO: Check payload
+                    // found = true;
+                    break;
+                }
+            } else {
+                superset = false;
+                break;
+            }
+
+            // if (!found) {
+            //     superset = false;
+            //     break;
+            // }
+        }
+        return superset;
+    }
 };
 
 pub const UnionTypeDefinition = struct {
@@ -460,7 +494,7 @@ pub const Value = union(ValueKind) {
                 else => false,
             },
             .Tag => |value| switch (other) {
-                .Tag => |other_value| value == other_value,
+                .Tag => |other_value| return &value.tag[0] == &other_value.tag[0],
                 else => false,
             }
         };

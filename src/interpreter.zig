@@ -136,6 +136,10 @@ pub const Interpreter = struct {
     }
 
     pub fn findOrAddTagType(this: *This, variants: []TagTypeDefinition.Variant) !Type {
+        for (variants) |*variant| {
+            variant.* = .{ .name = try this.findOrAddTag(variant.*.name) };
+        }
+
         var typ: ?u32 = null;
         for (this.tag_types.items) |tag_type, tag_index| {
             if (variants.len != tag_type.variants.len) continue;
@@ -143,7 +147,8 @@ pub const Interpreter = struct {
             var matches: usize = 0;
             for (variants) |needle| {
                 for (tag_type.variants) |variant| {
-                    if (std.mem.eql(u8, needle.name, variant.name)) {
+                    // if (std.mem.eql(u8, needle.name, variant.name)) {
+                    if (&needle.name[0] == &variant.name[0]) {
                         // @TODO: Check variant payload
                         matches += 1;
                         break;
@@ -297,6 +302,41 @@ pub const Interpreter = struct {
         }
 
         return try this.unionizeTypes(variants.items);
+    }
+
+    pub fn combineTagSets(this: *This, a: TagTypeDefinition, b: TagTypeDefinition) !Type {
+
+        var variants = ArrayListUnmanaged(TagTypeDefinition.Variant){};
+        errdefer variants.deinit(this.allocator);
+
+        for (a.variants) |variant| {
+            var exists = false;
+            for (variants.items) |v| {
+                if (&v.name[0] == &variant.name[0]) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (exists) continue;
+
+            try variants.append(this.allocator, variant);
+        }
+
+        for (b.variants) |variant| {
+            var exists = false;
+            for (variants.items) |v| {
+                if (&v.name[0] == &variant.name[0]) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (exists) continue;
+
+            try variants.append(this.allocator, variant);
+        }
+
+        const typ = try this.findOrAddTagType(variants.items);
+        return typ;
     }
 };
 

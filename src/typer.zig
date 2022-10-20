@@ -55,7 +55,7 @@ const Binding = union(enum) {
     Var: VarBinding,
     Lambda: VarBinding,
     Type: Type,
-    Tag: Type,
+    Tag: TagBinding,
 
     const This = @This();
 
@@ -69,6 +69,11 @@ const VarBinding = struct {
     type_open: bool = false,
     index: usize,
     global: bool,
+};
+
+const TagBinding = struct {
+    tag: []const u8,
+    typ: Type,
 };
 
 const Scope = struct {
@@ -88,9 +93,10 @@ const Scope = struct {
         this.bindings.deinit(allocator);
     }
 
-    fn makeVarBinding(this: *This, typ: Type, global: bool) Binding {
+    fn makeVarBinding(this: *This, typ: Type, type_open: bool, global: bool) Binding {
         return Binding{ .Var = .{ 
             .typ = typ,
+            .type_open = type_open,
             .index = this.num_vars,
             .global = global,
         }};
@@ -220,7 +226,6 @@ pub const Typer = struct {
             },
 
             // Binary
-            .Assign,
             .Add,
             .Subtract,
             .Multiply,
@@ -240,6 +245,10 @@ pub const Typer = struct {
             .PartialCopy => {
                 const binary = node.downcast(AstBinary);
                 t_node = (try this.typecheckBinary(binary)).asAst();
+            },
+            .Assign => {
+                const assign = node.downcast(AstBinary);
+                t_node = (try this.typecheckAssign(assign)).asAst();
             },
             .Dot => {
                 const dot = node.downcast(AstBinary);
@@ -371,12 +380,25 @@ pub const Typer = struct {
                     get.* = AstGetType.init(ident.token, typ);
                     t_node = get.asAst();
                 },
-                .Tag => |typ| {
+                .Tag => |tag_binding| {
                     var get = try this.allocator.create(AstGetTag);
-                    get.* = AstGetTag.init(ident.token, typ, ident.ident);
+                    const tag = try this.interp.findOrAddTag(ident.ident);
+                    get.* = AstGetTag.init(ident.token, tag_binding.typ, tag);
                     t_node = get.asAst();
                 },
             }
+        } else if (ident.big) {
+            const tag = try this.interp.findOrAddTag(ident.ident);
+            const variants = try this.allocator.alloc(TagTypeDefinition.Variant, 1);
+            variants[0] = .{ .name = tag };
+            const tag_type = try this.interp.findOrAddTagType(variants);
+
+            const tag_binding = TagBinding{ .tag = tag, .typ = tag_type };
+            _ = try this.currentScope().addBinding(this.allocator, ident, Binding{ .Tag = tag_binding }, &this.err_msg);
+
+            var get = try this.allocator.create(AstGetTag);
+            get.* = AstGetTag.init(ident.token, tag_type, tag);
+            t_node = get.asAst();
         } else {
             return raise(error.TypeError, &this.err_msg, ident.token.location, "Undeclarated identifier `{s}`.", .{ident.ident});
         }
@@ -442,12 +464,6 @@ pub const Typer = struct {
         const t_rhs = (try this.typecheckNode(binary.rhs));
 
         switch (binary.kind) {
-            .Assign => {
-                if (!t_rhs.?.typ.?.compat(t_lhs.typ.?)) {
-                    return raise(error.TypeError, &this.err_msg, t_rhs.?.token.location, "Expected a `{}` value but encountered a `{}` value.", .{t_lhs.typ.?, t_rhs.?.typ.?});
-                }
-                binary.typ = .None;
-            },
             .Add => {
                 binary.typ = try this.inferReturnTypeOfArithmetic("+", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
             },
@@ -617,6 +633,57 @@ pub const Typer = struct {
         }
 
         return ret_type;
+    }
+
+    fn typecheckAssign(this: *This, assign: *AstBinary) !*AstBinary {
+        const t_rhs = (try this.typecheckNode(assign.rhs)).?;
+        if (t_rhs.typ.? == .Tag and assign.lhs.kind == .Ident) {
+            const ident = assign.lhs.downcast(AstIdent);
+            try this.typecheckAssignTag(assign, ident, t_rhs);
+        } else {
+            const t_lhs = (try this.typecheckNode(assign.lhs)).?;
+            if (!t_rhs.typ.?.compat(t_lhs.typ.?)) {
+                return raise(error.TypeError, &this.err_msg, t_rhs.token.location, "Expected a `{}` value but encountered a `{}` value.", .{t_lhs.typ.?, t_rhs.typ.?});
+            }
+
+            assign.lhs = t_lhs;
+        }
+        
+        assign.typ = .None;
+        assign.rhs = t_rhs;
+        return assign;
+    }
+
+    fn typecheckAssignTag(this: *This, assign: *AstBinary, ident: *AstIdent, expr: *Ast) !void {
+        if (this.currentScope().findBinding(ident.ident)) |binding| {
+            switch (binding.*) {
+                .Var => |*var_binding| {
+                    if (!var_binding.type_open) {
+                        todo("Error Message");
+                    }
+
+                    switch (var_binding.typ) {
+                        .Tag => |binding_tag_index| {
+                            const expr_tag_index = switch (expr.typ.?) {
+                                .Tag => |eti| eti,
+                                else => unreachable,
+                            };
+
+                            const binding_tag_type = this.interp.tag_types.items[binding_tag_index];
+                            const expr_tag_type = this.interp.tag_types.items[expr_tag_index];
+                            
+                            var_binding.typ = try this.interp.combineTagSets(binding_tag_type, expr_tag_type);
+
+                            assign.lhs = (try this.typecheckNode(ident.asAst())).?;
+                        },
+                        else => todo("Error Message"),
+                    }
+                },
+                else => todo("Error Message"),
+            }
+        } else {
+            return raise(error.TypeError, &this.err_msg, ident.token.location, "Unknown identifier `{s}`.", .{ident.ident});
+        }
     }
 
     fn typecheckBlock(this: *This, block: *AstBlock) !*AstBlock {
@@ -893,7 +960,7 @@ pub const Typer = struct {
         const it_type = try this.inferIteratorVariableType(t_con.typ.?, t_con.token.location);
 
         var current_scope = this.currentScope();
-        const it_binding = current_scope.makeVarBinding(it_type, this.current_function == null);
+        const it_binding = current_scope.makeVarBinding(it_type, false, this.current_function == null);
         _ = try current_scope.addBinding(this.allocator, _for.iterator, it_binding, &this.err_msg);
 
         const t_block = try this.typecheckBlock(_for.block);
@@ -1092,6 +1159,7 @@ pub const Typer = struct {
         const t_init = (try this.typecheckNode(_var.initializer)).?;
 
         var var_type = t_init.typ.?;
+        var can_be_open = true;
         if (_var.specified_type) |specified_type_signature| {
             const specified_type = try this.typecheckTypeSignature(specified_type_signature);
             if (!t_init.typ.?.compat(specified_type)) {
@@ -1099,10 +1167,11 @@ pub const Typer = struct {
             }
 
             var_type = specified_type;
+            can_be_open = false;
         }
 
         const current_scope = this.currentScope();
-        const binding = current_scope.makeVarBinding(var_type, this.current_function == null);
+        const binding = current_scope.makeVarBinding(var_type, can_be_open and var_type == .Tag, this.current_function == null);
         _ = try current_scope.addBinding(this.allocator, _var.ident, binding, &this.err_msg);
 
         _var.initializer = t_init;
