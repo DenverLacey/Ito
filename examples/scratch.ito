@@ -47,10 +47,11 @@ Namelike
 var
   name = Fullname{ "Denver", "Lacey" }
   person = Person{ name, 23 }
-# direction = Up
+  direction = Up
 
 name
 person
+direction
 # println(name)
 # println(person)
 # println(direciton)

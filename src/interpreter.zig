@@ -137,7 +137,7 @@ pub const Interpreter = struct {
 
     pub fn findOrAddTagType(this: *This, variants: []TagTypeDefinition.Variant) !Type {
         for (variants) |*variant| {
-            variant.* = .{ .name = try this.findOrAddTag(variant.*.name) };
+            variant.* = .{ .name = try this.findOrAddTag(variant.name) };
         }
 
         var typ: ?u32 = null;
@@ -147,7 +147,6 @@ pub const Interpreter = struct {
             var matches: usize = 0;
             for (variants) |needle| {
                 for (tag_type.variants) |variant| {
-                    // if (std.mem.eql(u8, needle.name, variant.name)) {
                     if (&needle.name[0] == &variant.name[0]) {
                         // @TODO: Check variant payload
                         matches += 1;
@@ -305,7 +304,6 @@ pub const Interpreter = struct {
     }
 
     pub fn combineTagSets(this: *This, a: TagTypeDefinition, b: TagTypeDefinition) !Type {
-
         var variants = ArrayListUnmanaged(TagTypeDefinition.Variant){};
         errdefer variants.deinit(this.allocator);
 

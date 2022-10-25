@@ -1,0 +1,41 @@
+type
+  Pos =
+    { x : Num
+    , y : Num
+    }
+
+
+var pos = { x: 1.2, y: 3.4 }
+pos
+
+
+def move(pos: Pos) -> None =
+  pos.x = pos.x + 5.0
+  pos.y = pos.y - 5.0
+
+
+move(pos)
+pos
+
+
+type
+  Rev =
+    { y : Num
+    , x : Num
+    }
+
+
+def swap(p: Pos) -> None =
+  var x = p.x
+  p.x = p.y
+  p.y = x
+
+
+var rev = Rev{ 5.6, 7.8 } # fix bug: Same as { x: 5.6, y: 7.8 } when it should be { y: 5.6, x: 7.8 }
+rev
+
+swap(pos)
+pos
+
+swap(rev)
+rev

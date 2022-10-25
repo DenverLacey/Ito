@@ -91,14 +91,17 @@ pub const GarbageCollector = struct {
 
     pub fn copyString(this: *This, s: []const u8) ![]const u8 {
         const allocated = try this.allocator.dupe(u8, s);
+        try this.manageString(allocated);
+        return allocated;
+    }
 
+    pub fn manageString(this: *This, allocated: []const u8) !void {
         if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING \"{s}\"\n", .{allocated});
             debug_num_allocations += 1;
         }
 
         try this.strings.append(this.allocator, GCValue([]const u8){ .marked = false, .value = allocated });
-        return allocated;
     }
 
     pub fn allocateList(this: *This) !*List {

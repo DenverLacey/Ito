@@ -465,13 +465,23 @@ pub const Typer = struct {
 
         switch (binary.kind) {
             .Add => {
-                binary.typ = try this.inferReturnTypeOfArithmetic("+", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
+                if (t_lhs.typ.? == .Str and t_rhs.?.typ.? == .Str) {
+                    binary.typ = .Str;
+                } else {
+                    binary.typ = try this.inferReturnTypeOfArithmetic("+", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
+                }
             },
             .Subtract => {
                 binary.typ = try this.inferReturnTypeOfArithmetic("-", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
             },
             .Multiply => {
-                binary.typ = try this.inferReturnTypeOfArithmetic("*", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
+                if ((t_lhs.typ.? == .Str and t_rhs.?.typ.? == .Int) or
+                    (t_lhs.typ.? == .Int and t_rhs.?.typ.? == .Str))
+                {
+                    binary.typ = .Str;
+                } else {
+                    binary.typ = try this.inferReturnTypeOfArithmetic("*", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
+                }
             },
             .Divide => {
                 binary.typ = try this.inferReturnTypeOfArithmetic("/", binary.token.location, t_lhs.typ.?, t_rhs.?.typ.?);
@@ -629,7 +639,7 @@ pub const Typer = struct {
                 ret_type = try this.interp.unionizeTypes(&[_]Type{ type_a, type_b });
             }
         } else {
-            return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an Int or Num value.", .{});
+            return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an `Int` or `Num`value.", .{});
         }
 
         return ret_type;

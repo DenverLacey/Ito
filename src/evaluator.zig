@@ -443,19 +443,29 @@ pub const Evaluator = struct {
         const lhs = try this.evaluateNode(lhs_node);
         const rhs = try this.evaluateNode(rhs_node);
 
-        return switch (lhs) {
+        const error_message = "`+` requires its first operand to be either an `Int`, `Num` or `Str` value.";
+
+        switch (lhs) {
             .Int => |lhs_value| switch (rhs) {
-                .Int => |rhs_value| Value{ .Int = lhs_value + rhs_value },
-                .Num => |rhs_value| Value{ .Num = @intToFloat(f64, lhs_value) + rhs_value },
-                else => raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, "`+` requires its second operand to be either an `Int` or a `Num`.", .{}),
+                .Int => |rhs_value| return Value{ .Int = lhs_value + rhs_value },
+                .Num => |rhs_value| return Value{ .Num = @intToFloat(f64, lhs_value) + rhs_value },
+                else => return raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, error_message, .{}),
             },
             .Num => |lhs_value| switch (rhs) {
-                .Int => |rhs_value| Value{ .Num = lhs_value + @intToFloat(f64, rhs_value) },
-                .Num => |rhs_value| Value{ .Num = lhs_value + rhs_value },
-                else => raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, "`+` requires its second operand to be either an `Int` or a `Num`.", .{}),
+                .Int => |rhs_value| return Value{ .Num = lhs_value + @intToFloat(f64, rhs_value) },
+                .Num => |rhs_value| return Value{ .Num = lhs_value + rhs_value },
+                else => return raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, error_message, .{}),
             },
-            else => raise(error.RuntimeError, &this.err_msg, lhs_node.token.location, "`+` requires its first operand to be either an `Int` or a `Num`.", .{}),
-        };
+            .Str => |lhs_value| switch (rhs) {
+                .Str => |rhs_value| {
+                    const allocated_str = try std.mem.concat(this.allocator, u8, &[_][]const u8{ lhs_value, rhs_value });
+                    try this.gc.manageString(allocated_str);
+                    return Value{ .Str = allocated_str };
+                },
+                else => return raise(error.RuntimeError, &this.err_msg, lhs_node.token.location, error_message, .{}),
+            },
+            else => return raise(error.RuntimeError, &this.err_msg, lhs_node.token.location, error_message, .{}),
+        }
     }
 
     fn evaluateSubtract(this: *This, lhs_node: *Ast, rhs_node: *Ast) anyerror!Value {
@@ -481,19 +491,47 @@ pub const Evaluator = struct {
         const lhs = try this.evaluateNode(lhs_node);
         const rhs = try this.evaluateNode(rhs_node);
 
-        return switch (lhs) {
+        const error_message = "`*` requires its first operand to be either an `Int`, `Num` or `Str` value.";
+
+        switch (lhs) {
             .Int => |lhs_value| switch (rhs) {
-                .Int => |rhs_value| Value{ .Int = lhs_value * rhs_value },
-                .Num => |rhs_value| Value{ .Num = @intToFloat(f64, lhs_value) * rhs_value },
-                else => raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, "`*` requires its second operand to be either an `Int` or a `Num`.", .{}),
+                .Int => |rhs_value| return Value{ .Int = lhs_value * rhs_value },
+                .Num => |rhs_value| return Value{ .Num = @intToFloat(f64, lhs_value) * rhs_value },
+                .Str => |rhs_value| return this.evaluateMultiplyStr(rhs_value, lhs_value, lhs_node.token.location),
+                else => return raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, error_message, .{}),
             },
             .Num => |lhs_value| switch (rhs) {
-                .Int => |rhs_value| Value{ .Num = lhs_value * @intToFloat(f64, rhs_value) },
-                .Num => |rhs_value| Value{ .Num = lhs_value * rhs_value },
-                else => raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, "`*` requires its second operand to be either an `Int` or a `Num`.", .{}),
+                .Int => |rhs_value| return Value{ .Num = lhs_value * @intToFloat(f64, rhs_value) },
+                .Num => |rhs_value| return Value{ .Num = lhs_value * rhs_value },
+                else => return raise(error.RuntimeError, &this.err_msg, rhs_node.token.location, error_message, .{}),
             },
-            else => raise(error.RuntimeError, &this.err_msg, lhs_node.token.location, "`*` requires its first operand to be either an `Int` or a `Num`.", .{}),
-        };
+            .Str => |lhs_value| switch (rhs) {
+                .Int => |rhs_value| return this.evaluateMultiplyStr(lhs_value, rhs_value, rhs_node.token.location),
+                else => return raise(error.RuntimeError, &this.err_msg, lhs_node.token.location, error_message, .{}),
+            },
+            else => return raise(error.RuntimeError, &this.err_msg, lhs_node.token.location, error_message, .{}),
+        }
+    }
+
+    fn evaluateMultiplyStr(this: *This, s: []const u8, n: i64, n_location: CodeLocation) !Value {
+        if (n < 0) {
+            return raise(error.RuntimeError, &this.err_msg, n_location, "Can only multiply a string by a non-negative integer but {} was the actual value.", .{n});
+        } else if (n == 0) {
+            // @TODO: Implement optimisation
+        }
+
+        const _n = @intCast(usize, n);
+        const allocated_str = try this.allocator.alloc(u8, s.len * _n);
+
+        var i: usize = 0;
+        while (i < _n) : (i += 1) {
+            const offset = s.len * i;
+            var dest = allocated_str[offset..offset + s.len];
+            std.mem.copy(u8, dest, s);
+        }
+
+        try this.gc.manageString(allocated_str);
+        return Value{ .Str = allocated_str };
     }
 
     fn evaluateDivide(this: *This, lhs_node: *Ast, rhs_node: *Ast) anyerror!Value {
