@@ -63,11 +63,15 @@ pub const Ast = struct {
             // Blocks
             .Block, .Comma, .List, .Record => try writer.print("{}", .{this.downcastConst(AstBlock)}),
 
+            // Returns
+            .Return, .Break => try writer.print("{}", .{this.downcastConst(AstReturn)}),
+
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
             .For => try writer.print("{}", .{this.downcastConst(AstFor)}),
             .Case => try writer.print("{}", .{this.downcastConst(AstCase)}),
             .Def => try writer.print("{}", .{this.downcastConst(AstDef)}),
+            .Continue => try writer.print("{}", .{this.downcastConst(AstContinue)}),
             .Param => try writer.print("{}", .{this.downcastConst(AstParam)}),
             .Var => try writer.print("{}", .{this.downcastConst(AstVar)}),
             .VarBlock => try writer.print("{}", .{this.downcastConst(AstVarBlock)}),
@@ -128,11 +132,16 @@ pub const AstKind = enum {
     Comma,
     List,
     Record,
+    
+    // Returns
+    Return,
+    Break,
 
     If,
     While,
     For,
     Case,
+    Continue,
     Def,
     Param,
     Var,
@@ -313,6 +322,23 @@ pub const AstBlock = struct {
     }
 };
 
+pub const AstReturn = struct {
+    kind: AstKind,
+    token: Token,
+    typ: ?Type,
+    sub: ?*Ast,
+
+    const This = @This();
+
+    pub fn init(kind: AstKind, token: Token, sub: ?*Ast) This {
+        return This{ .kind = kind, .token = token, .typ = null, .sub = sub };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
 pub const AstIf = struct {
     kind: AstKind,
     token: Token,
@@ -401,6 +427,22 @@ pub const AstCase = struct {
             .default = default,
             .branches = branches,
         };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstContinue = struct {
+    kind: AstKind,
+    token: Token,
+    typ: ?Type,
+    
+    const This = @This();
+
+    pub fn init(token: Token) This {
+        return This{ .kind = .Continue, .token = token, .typ = null };
     }
 
     pub fn asAst(this: *This) *Ast {

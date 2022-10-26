@@ -29,10 +29,12 @@ const AstGetTag = ast.AstGetTag;
 const AstUnary = ast.AstUnary;
 const AstBinary = ast.AstBinary;
 const AstBlock = ast.AstBlock;
+const AstReturn = ast.AstReturn;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
 const AstCase = ast.AstCase;
+const AstContinue = ast.AstContinue;
 const AstDef = ast.AstDef;
 const AstInstantiateLambda = ast.AstInstantiateLambda;
 const AstParam = ast.AstParam;
@@ -270,6 +272,16 @@ pub const Typer = struct {
                 t_node = (try this.typecheckRecordLiteral(record)).asAst();
             },
 
+            // Returns
+            .Return => {
+                const ret = node.downcast(AstReturn);
+                t_node = (try this.typecheckReturn(ret)).asAst();
+            },
+            .Break => {
+                const _break = node.downcast(AstReturn);
+                t_node = (try this.typecheckBreak(_break)).asAst();
+            },
+
             .If => {
                 const _if = node.downcast(AstIf);
                 t_node = (try this.typecheckIf(_if)).asAst();
@@ -285,6 +297,10 @@ pub const Typer = struct {
             .Case => {
                 const case = node.downcast(AstCase);
                 t_node = (try this.typecheckCase(case)).asAst();
+            },
+            .Continue => {
+                // @TODO: Check that we're in a loop
+                t_node = node;
             },
             .Def => {
                 const def = node.downcast(AstDef);
@@ -639,7 +655,7 @@ pub const Typer = struct {
                 ret_type = try this.interp.unionizeTypes(&[_]Type{ type_a, type_b });
             }
         } else {
-            return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an `Int` or `Num`value.", .{});
+            return raise(error.TypeError, &this.err_msg, location, "`" ++ op ++ "` requires both its operands to be either an `Int` or `Num` value.", .{});
         }
 
         return ret_type;
@@ -927,6 +943,18 @@ pub const Typer = struct {
         }
 
         todo("Implement typechecking dot for associated functions.");
+    }
+
+    fn typecheckReturn(this: *This, ret: *AstReturn) !*AstReturn {
+        _ = this;
+        _ = ret;
+        todo("Implement typechecking return.");
+    }
+
+    fn typecheckBreak(this: *This, _break: *AstReturn) !*AstReturn {
+        _ = this;
+        _ = _break;
+        todo("Implement typechecking break.");
     }
 
     fn typecheckIf(this: *This, _if: *AstIf) !*AstIf {

@@ -23,10 +23,12 @@ const AstGetTag = ast.AstGetTag;
 const AstUnary = ast.AstUnary;
 const AstBinary = ast.AstBinary;
 const AstBlock = ast.AstBlock;
+const AstReturn = ast.AstReturn;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
 const AstCase = ast.AstCase;
+const AstContinue = ast.AstContinue;
 const AstDef = ast.AstDef;
 const AstInstantiateLambda = ast.AstInstantiateLambda;
 const AstParam = ast.AstParam;
@@ -62,6 +64,8 @@ const GarbageCollector = @import("gc.zig").GarbageCollector;
 
 const DEBUG_PRINT_BASE_NODE_RESULTS = true;
 const DEBUG_PRINT_SCOPE_VAR_LOOKUP  = false;
+
+const ReturnSignals = error{ReturnSignal, BreakSignal};
 
 
 pub const Scope = struct {
@@ -264,6 +268,18 @@ pub const Evaluator = struct {
                 return try this.evaluateRecordLiteral(record);
             },
 
+            // Returns
+            .Return => {
+                const ret = node.downcast(AstReturn);
+                try this.evaluateReturn(ret, error.ReturnSignal);
+                return Value.None;
+            },
+            .Break => {
+                const _break = node.downcast(AstReturn);
+                try this.evaluateReturn(_break, error.BreakSignal);
+                return Value.None;
+            },
+
             .If => {
                 const _if = node.downcast(AstIf);
                 return try this.evaluateIf(_if);
@@ -280,6 +296,7 @@ pub const Evaluator = struct {
                 const case = node.downcast(AstCase);
                 return try this.evaluateCase(case);
             },
+            .Continue => return error.ContinueSignal,
             .Def => {
                 return raise(error.InternalError, &this.err_msg, node.token.location, "AstDef node reached evaluation.", .{});
             },
@@ -1021,6 +1038,16 @@ pub const Evaluator = struct {
 
         const record_type = this.interp.record_types.items[record_index];
         return try this.evaluateCallRecordType(record.typ.?, record_type, record);
+    }
+
+    fn evaluateReturn(this: *This, ret: *AstReturn, signal: ReturnSignals) anyerror!void {
+        if (ret.sub) |sub| {
+            const return_value = try this.evaluateNode(sub);
+            // @TODO: Set return value
+            std.debug.print(">>> return_value = {}", .{return_value});
+        }
+
+        return signal;
     }
 
     fn evaluateIf(this: *This, _if: *AstIf) anyerror!Value {

@@ -1,12 +1,20 @@
-type Person = { name : Str, age : Int }
+# var s1 = "This is a string. "
+# var s2 = "This is another string."
+# var s3 = s1 + s2
 
+# s1
+# s2
+# s3
 
-def person_hello(p: Person) -> Str =
-  p.name + " says hello!"
+# var s4 = "A" * 3
+# s4
 
+# var s5 = $"The number is: {5}"
+# s5
 
-var person = Person{ "Denver", 23 }
-var hello = person_hello(person)
-
-person
-hello
+var i = 0
+while i < 5
+  if i == 3
+    break
+  i = i + 1
+i

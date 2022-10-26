@@ -20,10 +20,12 @@ const AstIdent = ast.AstIdent;
 const AstUnary = ast.AstUnary;
 const AstBinary = ast.AstBinary;
 const AstBlock = ast.AstBlock;
+const AstReturn = ast.AstReturn;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstFor = ast.AstFor;
 const AstCase = ast.AstCase;
+const AstContinue = ast.AstContinue;
 const AstDef = ast.AstDef;
 const AstParam = ast.AstParam;
 const AstVarBlock = ast.AstVarBlock;
@@ -110,6 +112,8 @@ pub const Token = struct {
             .DoubleQuestionMark => .NoneOr,
             .Arrow => .None, // @TODO: When we do annonymous lambdas maybe we want a particular precedence.
             .Dollar => .Call, // @NOTE: This might be too high a precedence
+            .BeginFStr => .None,
+            .EndFStr => .None,
 
             // Keywords
             .Do => .None,
@@ -121,6 +125,9 @@ pub const Token = struct {
             .While => .None,
             .For => .None,
             .In => .None,
+            .Break => .None,
+            .Continue => .None,
+            .Return => .None,
             .Def => .None,
             .Var => .None,
             .Type => .None,
@@ -175,6 +182,8 @@ pub const Token = struct {
                 .DoubleQuestionMark => try writer.print("??", .{}),
                 .Arrow => try writer.print("->", .{}),
                 .Dollar => try writer.print("$", .{}),
+                .BeginFStr => try writer.print("$\"", .{}),
+                .EndFStr => try writer.print("\"", .{}),
 
                 // Keywords
                 .Do => try writer.print("do", .{}),
@@ -186,6 +195,9 @@ pub const Token = struct {
                 .While => try writer.print("while", .{}),
                 .For => try writer.print("for", .{}),
                 .In => try writer.print("in", .{}),
+                .Break => _ = try writer.write("break"),
+                .Continue => _ = try writer.write("continue"),
+                .Return => _ = try writer.write("return"),
                 .Def => try writer.print("def", .{}),
                 .Var => try writer.print("var", .{}),
                 .Type => try writer.print("type", .{}),
@@ -240,6 +252,8 @@ pub const TokenKind = enum {
     DoubleQuestionMark,
     Arrow,
     Dollar,
+    BeginFStr,
+    EndFStr,
 
     // Keywords
     Do,
@@ -251,6 +265,9 @@ pub const TokenKind = enum {
     While,
     For,
     In,
+    Break,
+    Continue,
+    Return,
     Def,
     Var,
     Type,
@@ -300,6 +317,8 @@ pub const TokenData = union(TokenKind) {
     DoubleQuestionMark,
     Arrow,
     Dollar,
+    BeginFStr,
+    EndFStr,
 
     // Keywords
     Do,
@@ -311,6 +330,9 @@ pub const TokenData = union(TokenKind) {
     While,
     For,
     In,
+    Break,
+    Continue,
+    Return,
     Def,
     Var,
     Type,
@@ -363,6 +385,8 @@ pub const TokenData = union(TokenKind) {
             .DoubleQuestionMark => _ = try writer.write(".DoubleQuestionMark"),
             .Arrow => _ = try writer.write(".Arrow"),
             .Dollar => _ = try writer.write(".Dollar"),
+            .BeginFStr => _ = try writer.write(".BeginFStr"),
+            .EndFStr => _ = try writer.write(".EndFStr"),
 
             // Keywords
             .Do => _ = try writer.write(".Do"),
@@ -374,6 +398,9 @@ pub const TokenData = union(TokenKind) {
             .While => _ = try writer.write(".While"),
             .For => _ = try writer.write(".For"),
             .In => _ = try writer.write(".In"),
+            .Break => _ = try writer.write(".Break"),
+            .Continue => _ = try writer.write(".Continue"),
+            .Return => _ = try writer.write(".Return"),
             .Def => _ = try writer.write(".Def"),
             .Var => _ = try writer.write(".Var"),
             .Type => _ = try writer.write(".Type"),
@@ -564,9 +591,9 @@ pub const Tokenizer = struct {
             } else if (this.isNumBegin()) {
                 token = this.tokenizeNumber();
             } else if (isCharBegin(c)) {
-                token = try this.tokenizeTextLiteral(true);
+                token = try this.tokenizeTextLiteral(true, null);
             } else if (isStrBegin(c)) {
-                token = try this.tokenizeTextLiteral(false);
+                token = try this.tokenizeTextLiteral(false, null);
             } else if (isIdentBegin(c)) {
                 token = this.tokenizeIdentOrKeyword();
             } else {
@@ -660,7 +687,7 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn tokenizeTextLiteral(this: *This, comptime char: bool) !Token {
+    fn tokenizeTextLiteral(this: *This, comptime char: bool, early_terminator: ?Char) !Token {
         const location = this.currentLocation();
         const terminator = this.nextChar().?;
 
@@ -672,6 +699,13 @@ pub const Tokenizer = struct {
                 if (c == terminator) {
                     break;
                 }
+
+                if (early_terminator) |et| {
+                    if (c == et) {
+                        break;
+                    }
+                }
+
                 end_index = this.source.i;
             } else {
                 return raise(error.ParseError, this.err_msg, location, if (char) "Unended Char literal." else "Unended Str literal.", .{});
@@ -734,6 +768,12 @@ pub const Tokenizer = struct {
             Token.init(this.indentation, .For, location)
         else if (std.mem.eql(u8, word, "in"))
             Token.init(this.indentation, .In, location)
+        else if (std.mem.eql(u8, word, "return"))
+            Token.init(this.indentation, .Return, location)
+        else if (std.mem.eql(u8, word, "break"))
+            Token.init(this.indentation, .Break, location)
+        else if (std.mem.eql(u8, word, "continue"))
+            Token.init(this.indentation, .Continue, location)
         else if (std.mem.eql(u8, word, "def"))
             Token.init(this.indentation, .Def, location)
         else if (std.mem.eql(u8, word, "var"))
@@ -784,9 +824,39 @@ pub const Tokenizer = struct {
                 Token.init(this.indentation, .DoubleQuestionMark, location)
             else
                 Token.init(this.indentation, .QuestionMark, location),
-            '$' => Token.init(this.indentation, .Dollar, location),
+            '$' => if (this.nextIfEq('"'))
+                this.tokenizeFormattedString()
+            else
+                Token.init(this.indentation, .Dollar, location),
             else => |c| raise(error.ParseError, this.err_msg, location, "Invalid operator `{u}`.", .{c}),
         };
+    }
+
+    fn tokenizeFormattedString(this: *This) !Token {
+        const begin_location = this.currentLocation();
+        const begin_token = Token.init(this.indentation, .BeginFStr, begin_location);
+
+        while (true) {
+            if (this.nextChar()) |c| {
+                std.debug.print("c: {u}\n", .{c});
+                if (c == '"') {
+                    break;
+                } else if (c == '{') {
+                    todo("Implement tokenize format string holes.");
+                } else {
+                    const str_segment_token = try this.tokenizeTextLiteral(false, '{');
+                    try this.peeked_tokens.append(this.allocator, str_segment_token);
+                }
+            } else {
+                return raise(error.ParseError, this.err_msg, begin_location, "Unended Str literal.", .{});
+            }
+        }
+
+        const end_location = this.currentLocation();
+        const end_token = Token.init(this.indentation, .EndFStr, end_location);
+        try this.peeked_tokens.append(this.allocator, end_token);
+
+        return begin_token;
     }
 };
 
@@ -1094,6 +1164,15 @@ pub const Parser = struct {
             .Case => {
                 return (try this.parseCase(token)).asAst();
             },
+            .Return => {
+                return (try this.parseReturn(.Return, token)).asAst();
+            },
+            .Break => {
+                return (try this.parseReturn(.Break, token)).asAst();
+            },
+            .Continue => {
+                return (try this.createContinue(token)).asAst();
+            },
             // .Var => {
             //     return (try this.parseVar(token)).asAst();
             // },
@@ -1198,6 +1277,12 @@ pub const Parser = struct {
     fn createLiteral(this: *This, kind: AstKind, token: Token, literal: AstLiteral.Literal) !*AstLiteral {
         var node = try this.allocator.create(AstLiteral);
         node.* = AstLiteral.init(kind, token, literal);
+        return node;
+    }
+
+    fn createContinue(this: *This, token: Token) !*AstContinue {
+        var node = try this.allocator.create(AstContinue);
+        node.* = AstContinue.init(token);
         return node;
     }
 
@@ -1422,6 +1507,17 @@ pub const Parser = struct {
         }
 
         return try this.createNode(AstBinary, .{ .CaseBranch, arrow_token, gate, body });
+    }
+
+    fn parseReturn(this: *This, kind: AstKind, token: Token) !*AstReturn {
+        var sub: ?*Ast = null;
+        if ((try this.match(.Newline)) == null) {
+            sub = try this.parseExpression();
+        }
+
+        var node = try this.allocator.create(AstReturn);
+        node.* = AstReturn.init(kind, token, sub);
+        return node;
     }
 
     fn parseDef(this: *This, token: Token) !*AstDef {
