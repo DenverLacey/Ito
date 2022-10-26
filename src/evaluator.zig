@@ -65,8 +65,6 @@ const GarbageCollector = @import("gc.zig").GarbageCollector;
 const DEBUG_PRINT_BASE_NODE_RESULTS = true;
 const DEBUG_PRINT_SCOPE_VAR_LOOKUP  = false;
 
-const ReturnSignals = error{ReturnSignal, BreakSignal};
-
 
 pub const Scope = struct {
     parent: ?*This,
@@ -271,13 +269,13 @@ pub const Evaluator = struct {
             // Returns
             .Return => {
                 const ret = node.downcast(AstReturn);
-                try this.evaluateReturn(ret, error.ReturnSignal);
-                return Value.None;
+                try this.evaluateReturn(ret);
+                return error.ReturnSignal;
             },
             .Break => {
                 const _break = node.downcast(AstReturn);
-                try this.evaluateReturn(_break, error.BreakSignal);
-                return Value.None;
+                try this.evaluateReturn(_break);
+                return error.BreakSignal;
             },
 
             .If => {
@@ -1040,14 +1038,12 @@ pub const Evaluator = struct {
         return try this.evaluateCallRecordType(record.typ.?, record_type, record);
     }
 
-    fn evaluateReturn(this: *This, ret: *AstReturn, signal: ReturnSignals) anyerror!void {
+    fn evaluateReturn(this: *This, ret: *AstReturn) !void {
         if (ret.sub) |sub| {
             const return_value = try this.evaluateNode(sub);
             // @TODO: Set return value
             std.debug.print(">>> return_value = {}", .{return_value});
         }
-
-        return signal;
     }
 
     fn evaluateIf(this: *This, _if: *AstIf) anyerror!Value {
@@ -1073,7 +1069,11 @@ pub const Evaluator = struct {
                 break;
             }
 
-            rval = try this.evaluateNode(_while.block.asAst());
+            rval = this.evaluateBlock(_while.block) catch |err| switch (err) {
+                error.BreakSignal => break,
+                error.ContinueSignal => continue,
+                else => return err,
+            };
         }
 
         return rval;
@@ -1101,7 +1101,11 @@ pub const Evaluator = struct {
             defer this.endScope();
 
             try this.stack.pushVariable(this.allocator, this.currentScope(), it_id.ident, Value{ .Char = c });
-            rval = try this.evaluateBlock(block);
+            rval = this.evaluateBlock(block) catch |err| switch (err) {
+                error.BreakSignal => break,
+                error.ContinueSignal => continue,
+                else => return err,
+            };
         }
 
         return rval;
@@ -1116,7 +1120,11 @@ pub const Evaluator = struct {
             defer this.endScope();
 
             try this.stack.pushVariable(this.allocator, this.currentScope(), it_id.ident, Value{ .Int = i });
-            rval = try this.evaluateBlock(block);
+            rval = this.evaluateBlock(block) catch |err| switch (err) {
+                error.BreakSignal => break,
+                error.ContinueSignal => continue,
+                else => return err,
+            };
         }
 
         return rval;
@@ -1130,7 +1138,11 @@ pub const Evaluator = struct {
             defer this.endScope();
 
             try this.stack.pushVariable(this.allocator, this.currentScope(), it_id.ident, value);
-            rval = try this.evaluateBlock(block);
+            rval = this.evaluateBlock(block) catch |err| switch (err) {
+                error.BreakSignal => break,
+                error.ContinueSignal => continue,
+                else => return err,
+            };
         }
 
         return rval;

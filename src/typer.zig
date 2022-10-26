@@ -4,6 +4,7 @@ const ArrayList = std.ArrayList;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
+const SinglyLinkedList = std.SinglyLinkedList;
 
 const CodeLocation = @import("parser.zig").CodeLocation;
 
@@ -143,6 +144,20 @@ const CurrentFunction = struct {
     return_types: ArrayListUnmanaged(Type) = .{},
 };
 
+const LoopInfo = struct {
+    label: []const u8, // @NOTE: Currently using empty string to represent no label, maybe we should use null?
+    return_types: ArrayListUnmanaged(Type) = .{},
+
+    fn addReturnType(this: *LoopInfo, allocator: Allocator, typ: Type) !void {
+        for (this.return_types.items) |ret_type| {
+            if (ret_type.eql(typ)) {
+                return;
+            }
+        }
+        try this.return_types.append(allocator, typ);
+    }
+};
+
 pub const Typer = struct {
     allocator: Allocator,
     interp: *Interpreter,
@@ -152,6 +167,7 @@ pub const Typer = struct {
     scopes: BucketArrayUnmanaged(8, Scope),
 
     current_function: ?CurrentFunction,
+    loop_infos: SinglyLinkedList(LoopInfo),
 
     err_msg: ErrMsg,
 
@@ -165,11 +181,12 @@ pub const Typer = struct {
         return This{ 
             .allocator = interp.allocator,
             .interp = interp,
-            .nodes = ArrayListUnmanaged(*Ast){},
+            .nodes = .{},
             .global_scope = global_scope,
             .scopes = scopes,
             .current_function = null,
-            .err_msg = ErrMsg{},
+            .loop_infos = .{},
+            .err_msg = .{},
         };
     }
 
@@ -188,6 +205,28 @@ pub const Typer = struct {
         scope.deinit(this.allocator);
 
         this.scopes.pop(this.allocator);
+    }
+
+    fn currentLoopInfo(this: *This) ?*LoopInfo {
+        var first = this.loop_infos.first orelse return null;
+        return &first.data;
+    }
+
+    fn beginLoop(this: *This, label: ?[]const u8) !*LoopInfo {
+        const loop_info_label = label orelse "";
+        const info = LoopInfo{ .label = loop_info_label };
+
+        var new_node = try this.allocator.create(SinglyLinkedList(LoopInfo).Node);
+        new_node.data = info;
+        
+        this.loop_infos.prepend(new_node);
+
+        return &new_node.data;
+    }
+
+    fn endLoop(this: *This, info: *LoopInfo) void {
+        const first = this.loop_infos.popFirst() orelse std.debug.panic("No loops to end.", .{});
+        std.debug.assert(info == &first.data);
     }
 
     fn addNode(this: *This, node: *Ast) !void {
@@ -952,9 +991,18 @@ pub const Typer = struct {
     }
 
     fn typecheckBreak(this: *This, _break: *AstReturn) !*AstReturn {
-        _ = this;
-        _ = _break;
-        todo("Implement typechecking break.");
+        var loop = this.currentLoopInfo() orelse return raise(error.TypeError, &this.err_msg, _break.token.location, "Cannot break outside of a loop.", .{});
+
+        if (_break.sub) |sub| {
+            const t_sub = (try this.typecheckNode(sub)).?;
+            try loop.addReturnType(this.allocator, t_sub.typ.?);
+            _break.sub = t_sub;
+        } else {
+            try loop.addReturnType(this.allocator, .None);
+        }
+
+        _break.typ = .None;
+        return _break;
     }
 
     fn typecheckIf(this: *This, _if: *AstIf) !*AstIf {
@@ -978,20 +1026,29 @@ pub const Typer = struct {
     }
 
     fn typecheckWhile(this: *This, _while: *AstWhile) !*AstWhile {
+        var loop = try this.beginLoop(null);
+        defer this.endLoop(loop);
+
         const t_cond = (try this.typecheckNode(_while.condition)).?;
 
         var t_block: ?*AstBlock = null;
         t_block = try this.typecheckBlock(_while.block);
 
+        try loop.addReturnType(this.allocator, t_block.?.typ.?);
+        try loop.addReturnType(this.allocator, .None);
+
         _while.condition = t_cond;
         _while.block = t_block.?;
-        _while.typ = try this.interp.unionizeTypes(&[_]Type{ t_block.?.typ.?, .None });
+        _while.typ = try this.interp.unionizeTypes(loop.return_types.items);
         return _while;
     }
 
     fn typecheckFor(this: *This, _for: *AstFor) !*AstFor {
         try this.beginScope();
         defer this.endScope();
+
+        var loop = try this.beginLoop(null);
+        defer this.endLoop(loop);
 
         const t_con = (try this.typecheckNode(_for.container)).?;
 
@@ -1001,9 +1058,12 @@ pub const Typer = struct {
         const it_binding = current_scope.makeVarBinding(it_type, false, this.current_function == null);
         _ = try current_scope.addBinding(this.allocator, _for.iterator, it_binding, &this.err_msg);
 
-        const t_block = try this.typecheckBlock(_for.block);
+        const t_block: *AstBlock = try this.typecheckBlock(_for.block);
+        try loop.addReturnType(this.allocator, t_block.typ.?);
+    
+        try loop.addReturnType(this.allocator, .None);
 
-        _for.typ = try this.interp.unionizeTypes(&[_]Type{ t_block.typ.?, .None });
+        _for.typ = try this.interp.unionizeTypes(loop.return_types.items);
         _for.container = t_con;
         _for.block = t_block;
         return _for;
