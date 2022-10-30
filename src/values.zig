@@ -159,7 +159,8 @@ pub const Type = union(enum) {
             },
             .Record => |index| switch (with) {
                 .Any => return true,
-                .Record => |with_index| return index == with_index,
+                // .Record => |with_index| return index == with_index,
+                .Record => |with_index| return compatWithRecord(index, with_index),
                 .Union => |with_index| return this.compatWithUnion(with_index),
                 else => return false,
             },
@@ -187,6 +188,14 @@ pub const Type = union(enum) {
                 else => return false,
             },
         }
+    }
+
+    fn compatWithRecord(this_index: u32, other_record_index: u32) bool {
+        const interp = Interpreter.get();
+        const this_record = interp.record_types.items[this_index];
+        const with_record = interp.record_types.items[other_record_index];
+        const is_superset = with_record.isSuperset(this_record);
+        return is_superset;
     }
 
     fn compatWithTagSet(this_index: u32, tag_index: u32) bool {
@@ -303,6 +312,27 @@ pub const RecordTypeDefinition = struct {
             }
         }
         return null;
+    }
+
+    pub fn isSuperset(this: *const This, other: This) bool {
+        // @NOTE:
+        // Not checking for fields that have already been found should be ok
+        // because the names have to be unique. i.e we can't have a record that
+        // is like { x : T, x : U } or something.
+        //
+        for (other.fields) |other_field| {
+            for (this.fields) |this_field| {
+                if (std.mem.eql(u8, this_field.name, other_field.name) and
+                    this_field.typ.eql(other_field.typ))
+                {
+                    break;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        return true;
     }
 };
 

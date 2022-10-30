@@ -1332,6 +1332,21 @@ pub const Typer = struct {
                     fields[i] = RecordTypeDefinition.Field{ .name = field_name.ident, .typ = field_type };
                 }
 
+                // Check that there aren't any duplicate field names
+                i = 0;
+                while (i < fields.len) : (i += 1) {
+                    const name_i = fields[i].name;
+
+                    var j = i + 1;
+                    while (j < fields.len) : (j += 1) {
+                        const name_j = fields[j].name;
+
+                        if (std.mem.eql(u8, name_i, name_j)) {
+                            return raise(error.TypeError, &this.err_msg, sig.token.location, "Cannot have multiple fields with the same name.", .{});
+                        }
+                    }
+                }
+
                 typ = try this.interp.findOrAddRecordType(fields);
             },
             .Tag => |tag_data| {

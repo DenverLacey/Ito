@@ -106,21 +106,39 @@ pub const Interpreter = struct {
         for (this.record_types.items) |record_type, record_index| {
             if (fields.len != record_type.fields.len) continue;
 
-            var matches: usize = 0;
-            for (fields) |needle| {
-                for (record_type.fields) |field| {
-                    if (std.mem.eql(u8, needle.name, field.name)) {
-                        // @TODO: Check field types
-                        matches += 1;
-                        break;
-                    }
-                }
-            }
+            var i: usize = 0;
+            while (i < fields.len) : (i += 1) {
+                const field_a = fields[i];
+                const field_b = record_type.fields[i];
 
-            if (matches == fields.len) {
+                if (!std.mem.eql(u8, field_a.name, field_b.name) or
+                    !field_a.typ.eql(field_b.typ))
+                {
+                    break;
+                }
+            } else {
                 typ = @intCast(u32, record_index);
                 break;
             }
+
+            // @TODO:
+            // Use this for checking record type compatibility.
+            //
+            // var matches: usize = 0;
+            // for (fields) |needle| {
+            //     for (record_type.fields) |field| {
+            //         if (std.mem.eql(u8, needle.name, field.name)) {
+            //             // @TODO: Check field types
+            //             matches += 1;
+            //             break;
+            //         }
+            //     }
+            // }
+
+            // if (matches == fields.len) {
+            //     typ = @intCast(u32, record_index);
+            //     break;
+            // }
         }
 
         if (typ == null) {
