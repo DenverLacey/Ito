@@ -12,24 +12,9 @@
 # var s5 = $"The number is: {5}"
 # s5
 
+var x = 1
+x = 2
+x
 
-type
-  Pos = { x: Num, y: Num }
-  Rev = { y: Num, x: Num }
-
-
-def swap_coords(p: Pos) -> None =
-  var x = p.x
-  p.x = p.y
-  p.y = x
-
-
-var pos = Pos{ 5, 6 }
-var rev = Rev{ 6, 5 }
-pos
-rev
-
-swap_coords(pos)
-swap_coords(rev)
-pos
-rev
+for i in [1, 2, 3]
+  i = 1

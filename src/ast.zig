@@ -543,16 +543,18 @@ pub const AstVar = struct {
     kind: AstKind,
     token: Token,
     typ: ?Type,
+    immutable: bool,
     ident: *AstIdent,
     initializer: *Ast,
     specified_type: ?*AstTypeSignature,
 
     const This = @This();
 
-    pub fn init(token: Token, ident: *AstIdent, initializer: *Ast, specified_type: ?*AstTypeSignature) This {
+    pub fn init(token: Token, ident: *AstIdent, immutable: bool, initializer: *Ast, specified_type: ?*AstTypeSignature) This {
         return This{
             .kind = .Var,
             .token = token,
+            .immutable = immutable,
             .typ = null,
             .ident = ident,
             .initializer = initializer,

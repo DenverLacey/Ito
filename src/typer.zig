@@ -70,6 +70,7 @@ const Binding = union(enum) {
 const VarBinding = struct {
     typ: Type,
     type_open: bool = false,
+    immutable: bool = false,
     index: usize,
     global: bool,
 };
@@ -96,10 +97,11 @@ const Scope = struct {
         this.bindings.deinit(allocator);
     }
 
-    fn makeVarBinding(this: *This, typ: Type, type_open: bool, global: bool) Binding {
+    fn makeVarBinding(this: *This, typ: Type, type_open: bool, immutable: bool, global: bool) Binding {
         return Binding{ .Var = .{ 
             .typ = typ,
             .type_open = type_open,
+            .immutable = immutable,
             .index = this.num_vars,
             .global = global,
         }};
@@ -701,6 +703,11 @@ pub const Typer = struct {
     }
 
     fn typecheckAssign(this: *This, assign: *AstBinary) !*AstBinary {
+        if (assign.lhs.kind == .Ident) {
+            const ident = assign.lhs.downcast(AstIdent);
+            try this.assertIdentBindsToMutableVariable(ident);
+        }
+
         const t_rhs = (try this.typecheckNode(assign.rhs)).?;
         if (t_rhs.typ.? == .Tag and assign.lhs.kind == .Ident) {
             const ident = assign.lhs.downcast(AstIdent);
@@ -717,6 +724,23 @@ pub const Typer = struct {
         assign.typ = .None;
         assign.rhs = t_rhs;
         return assign;
+    }
+
+    fn assertIdentBindsToMutableVariable(this: *This, ident: *AstIdent) !void {
+        if (this.currentScope().findBinding(ident.ident)) |binding| {
+            switch (binding.*) {
+                .Var => |var_binding| {
+                    if (var_binding.immutable) {
+                        return raise(error.TypeError, &this.err_msg, ident.token.location, "Cannot assign to immutable variable `{s}`.", .{ident.ident});
+                    }
+                },
+                else => {
+                    return raise(error.InternalError, &this.err_msg, ident.token.location, "identifier doesn't refer to a VarBinding.", .{});
+                },
+            }
+        } else {
+            return raise(error.TypeError, &this.err_msg, ident.token.location, "Unknown identifier `{s}`.", .{ident.ident});
+        }
     }
 
     fn typecheckAssignTag(this: *This, assign: *AstBinary, ident: *AstIdent, expr: *Ast) !void {
@@ -1055,7 +1079,7 @@ pub const Typer = struct {
         const it_type = try this.inferIteratorVariableType(t_con.typ.?, t_con.token.location);
 
         var current_scope = this.currentScope();
-        const it_binding = current_scope.makeVarBinding(it_type, false, this.current_function == null);
+        const it_binding = current_scope.makeVarBinding(it_type, false, true, this.current_function == null); // @NOTE: maybe we should make this mutable because that would be more useful despite the complextity (which isn't that bad)
         _ = try current_scope.addBinding(this.allocator, _for.iterator, it_binding, &this.err_msg);
 
         const t_block: *AstBlock = try this.typecheckBlock(_for.block);
@@ -1269,7 +1293,11 @@ pub const Typer = struct {
         }
 
         const current_scope = this.currentScope();
-        const binding = current_scope.makeVarBinding(var_type, can_be_open and var_type == .Tag, this.current_function == null);
+        const binding = current_scope.makeVarBinding(
+            var_type,
+            can_be_open and var_type == .Tag,
+            _var.immutable, this.current_function == null
+        );
         _ = try current_scope.addBinding(this.allocator, _var.ident, binding, &this.err_msg);
 
         _var.initializer = t_init;

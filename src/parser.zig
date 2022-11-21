@@ -130,6 +130,7 @@ pub const Token = struct {
             .Return => .None,
             .Def => .None,
             .Var => .None,
+            .Let => .None,
             .Type => .None,
             .Module => .None,
         };
@@ -200,6 +201,7 @@ pub const Token = struct {
                 .Return => _ = try writer.write("return"),
                 .Def => try writer.print("def", .{}),
                 .Var => try writer.print("var", .{}),
+                .Let => try writer.print("let", .{}),
                 .Type => try writer.print("type", .{}),
                 .Module => try writer.print("module", .{}),
             }
@@ -270,6 +272,7 @@ pub const TokenKind = enum {
     Return,
     Def,
     Var,
+    Let,
     Type,
     Module,
 };
@@ -335,6 +338,7 @@ pub const TokenData = union(TokenKind) {
     Return,
     Def,
     Var,
+    Let,
     Type,
     Module,
 
@@ -403,6 +407,7 @@ pub const TokenData = union(TokenKind) {
             .Return => _ = try writer.write(".Return"),
             .Def => _ = try writer.write(".Def"),
             .Var => _ = try writer.write(".Var"),
+            .Let => _ = try writer.write(".Let"),
             .Type => _ = try writer.write(".Type"),
             .Module => _ = try writer.write(".Module"),
         }
@@ -778,6 +783,8 @@ pub const Tokenizer = struct {
             Token.init(this.indentation, .Def, location)
         else if (std.mem.eql(u8, word, "var"))
             Token.init(this.indentation, .Var, location)
+        else if (std.mem.eql(u8, word, "let"))
+            Token.init(this.indentation, .Let, location)
         else if (std.mem.eql(u8, word, "type"))
             Token.init(this.indentation, .Type, location)
         else if (is_big)
@@ -1041,6 +1048,8 @@ pub const Parser = struct {
         return if (try this.match(.Def)) |token|
             (try this.parseDef(token)).asAst()
         else if (try this.match(.Var)) |token|
+            try this.parseVar(token)
+        else if (try this.match(.Let)) |token|
             try this.parseVar(token)
         else if (try this.match(.Type)) |token|
             try this.parseType(token)
@@ -1571,6 +1580,7 @@ pub const Parser = struct {
     }
 
     fn parseVar(this: *This, token: Token) !*Ast {
+        const immutable = token.data == .Let;
         var decls = ArrayListUnmanaged(*AstVar){};
 
         try this.skipNewlines();
@@ -1590,7 +1600,7 @@ pub const Parser = struct {
             const eql_token = try this.expect(.Equal, "Expected `=` after identifier in variable declaration.");
             const initializer = try this.parseExpression();
             
-            const decl = try this.createNode(AstVar, .{ eql_token, ident, initializer, specified_type });
+            const decl = try this.createNode(AstVar, .{ eql_token, ident, immutable, initializer, specified_type });
             try decls.append(this.allocator, decl);
         }
         
@@ -1616,7 +1626,7 @@ pub const Parser = struct {
                 const eql_token = try this.expect(.Equal, "Expected `=` after identifier in variable declaration.");
                 const initializer = try this.parseExpression();
 
-                const decl = try this.createNode(AstVar, .{ eql_token, ident, initializer, specified_type });
+                const decl = try this.createNode(AstVar, .{ eql_token, ident, immutable, initializer, specified_type });
                 try decls.append(this.allocator, decl);
             } else {
                 break;
