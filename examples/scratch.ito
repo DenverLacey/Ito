@@ -4,7 +4,7 @@
 def add(a: Num, b: Num) -> Num =
   a + b
 add
-  
+ 
 def sub(a: Num, b: Num) -> Num =
   a - b
 sub
@@ -28,7 +28,7 @@ type
     }
   
   Direction =
-    [ Up
+    [ Up 
     , Down
     , Left
     , Right

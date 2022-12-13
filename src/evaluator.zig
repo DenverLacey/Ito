@@ -119,6 +119,7 @@ pub const Evaluator = struct {
     scopes: ArrayListUnmanaged(Scope),
     stack: VariableStack,
     call_frames: ArrayListUnmanaged(CallFrame),
+    return_value: ?Value,
     err_msg: ErrMsg,
 
     const This = @This();
@@ -134,6 +135,7 @@ pub const Evaluator = struct {
             .scopes = scopes,
             .stack = VariableStack{},
             .call_frames = ArrayListUnmanaged(CallFrame){},
+            .return_value = null,
             .err_msg = ErrMsg{},
         };
     }
@@ -734,10 +736,16 @@ pub const Evaluator = struct {
     }
 
     fn callClosure(this: *This, closure: *Closure) anyerror!Value {
-        // @TODO:
-        // Handle early return
-        //
-        return this.evaluateBlock(closure.code);
+        const rval = this.evaluateBlock(closure.code) catch |err| switch (err) {
+            error.ReturnSignal => blk: {
+                const return_value = this.return_value orelse return raise(error.InternalError, &this.err_msg, null, "Return value not set on return signal.", .{});
+                this.return_value = null;
+                break :blk return_value;
+            },
+            else => return err,
+        };
+
+        return rval;
     }
 
     fn evaluateCallClosure(
@@ -1040,10 +1048,12 @@ pub const Evaluator = struct {
 
     fn evaluateReturn(this: *This, ret: *AstReturn) !void {
         if (ret.sub) |sub| {
-            const return_value = try this.evaluateNode(sub);
-            // @TODO: Set return value
-            std.debug.print(">>> return_value = {}", .{return_value});
+            this.return_value = try this.evaluateNode(sub);
+        } else {
+            this.return_value = .None;
         }
+
+        return error.ReturnSignal;
     }
 
     fn evaluateIf(this: *This, _if: *AstIf) anyerror!Value {

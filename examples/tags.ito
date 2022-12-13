@@ -31,9 +31,9 @@ def shout_direction(dir: Dir) -> Str =
 var shouted = shout_direction(direction)
 shouted
 
-# This doesn't typecehck because Diagonal is not apart of the Dir tag set
 # direction = Diagonal
 # direction
+# # This doesn't typecehck because Diagonal is not apart of the Dir tag set
 # shouted = shout_direction(direction)
 # shouted
 

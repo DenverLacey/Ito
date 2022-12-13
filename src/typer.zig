@@ -144,6 +144,15 @@ const CurrentFunction = struct {
     name: []const u8,
     infer_return_type: bool = false,
     return_types: ArrayListUnmanaged(Type) = .{},
+
+    fn addReturnType(this: *CurrentFunction, allocator: Allocator, typ: Type) !void {
+        for (this.return_types.items) |ret_type| {
+            if (ret_type.eql(typ)) {
+                return;
+            }
+        }
+        try this.return_types.append(allocator, typ);
+    }
 };
 
 const LoopInfo = struct {
@@ -1009,9 +1018,31 @@ pub const Typer = struct {
     }
 
     fn typecheckReturn(this: *This, ret: *AstReturn) !*AstReturn {
-        _ = this;
-        _ = ret;
-        todo("Implement typechecking return.");
+        if (ret.sub) |sub| {
+            ret.sub = try this.typecheckNode(sub);
+            try this.typecheckReturnTypes(ret.sub.?.typ.?, ret.token.location);
+        } else {
+            try this.typecheckReturnTypes(.None, ret.token.location);
+        }
+
+        ret.typ = .None;
+        return ret;
+    }
+
+    fn typecheckReturnTypes(this: *This, given: Type, location: CodeLocation) !void {
+        const cf = &(this.current_function orelse return raise(error.TypeError, &this.err_msg, location, "Cannot return outside of a function.", .{}));
+
+        if (cf.infer_return_type) {
+            try cf.addReturnType(this.allocator, given);
+        } else {
+            for (cf.return_types.items) |ret_type| {
+                if (given.compat(ret_type)) {
+                    break;
+                }
+            } else {
+                return raise(error.TypeError, &this.err_msg, location, "Cannot return a `{}` value from this function.", .{given}); // @TODO: Better error message
+            }
+        }
     }
 
     fn typecheckBreak(this: *This, _break: *AstReturn) !*AstReturn {

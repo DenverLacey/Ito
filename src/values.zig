@@ -349,22 +349,14 @@ pub const TagTypeDefinition = struct {
     pub fn isSuperset(this: *const This, other: This) bool {
         var superset = true;
         for (other.variants) |other_variant| {
-            // var found = false;
             for (this.variants) |variant| {
                 if (&variant.name[0] == &other_variant.name[0]) {
-                    // @TODO: Check payload
-                    // found = true;
                     break;
                 }
             } else {
                 superset = false;
                 break;
             }
-
-            // if (!found) {
-            //     superset = false;
-            //     break;
-            // }
         }
         return superset;
     }

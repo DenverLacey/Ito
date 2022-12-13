@@ -5,7 +5,7 @@ type
     }
 
 
-var pos = { x: 1.2, y: 3.4 }
+let pos = { x: 1.2, y: 3.4 }
 pos
 
 
@@ -26,12 +26,12 @@ type
 
 
 def swap(p: Pos) -> None =
-  var x = p.x
+  let x = p.x
   p.x = p.y
   p.y = x
 
 
-var rev = Rev{ 5.6, 7.8 }
+let rev = Rev{ 5.6, 7.8 }
 rev
 
 swap(pos)

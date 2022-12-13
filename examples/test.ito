@@ -12,9 +12,19 @@
 # var s5 = $"The number is: {5}"
 # s5
 
-var x = 1
-x = 2
-x
+def div(a: Num, b: Num) -> Num =
+  if b == 0
+    return 0
+  
+  a / b
 
-for i in [1, 2, 3]
-  i = 1
+
+let x = 4
+let y = 2
+let z = 0
+
+let xy = div(x, y)
+let xz = div(x, z)
+
+xy
+xz
